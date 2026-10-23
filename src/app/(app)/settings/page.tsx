@@ -23,14 +23,21 @@ import {
   createResetLinkAction,
   deactivateMemberAction,
   deleteAccountAction,
+  deleteWorkflowAction,
+  installSampleWorkflowAction,
   inviteMemberAction,
+  saveWorkflowAction,
   shareCalendarAction,
+  toggleWorkflowAction,
   updateDashboardPrefsAction,
   updateHouseholdAction,
   updateIntegrationAction,
   updateProfileAction,
   switchLocaleAction,
 } from "@/lib/actions";
+import { listWorkflows, sampleWorkflowList, WORKFLOW_OPERATIONS } from "@/lib/domain/image-workflows";
+import { comfyuiConfigured } from "@/lib/images/comfyui";
+import { imageQueueInfo } from "@/lib/images/queue";
 import { Badge, Card, FeedbackBanner, MemberAvatar, PageHeader } from "@/components/ui";
 
 export const metadata = { title: "Settings & family" };
@@ -83,6 +90,10 @@ export default async function SettingsPage({
   const calendars = listCalendars(actor);
   const invitations = can(actor, "members.manage") ? listInvitations(actor) : [];
   const integrations = listIntegrations(actor);
+  const canManageWorkflows = can(actor, "household.manage");
+  const workflows = canManageWorkflows ? listWorkflows(actor, { includeDisabled: true }) : [];
+  const samples = sampleWorkflowList();
+  const queue = imageQueueInfo(actor);
   const audit = can(actor, "audit.read") ? listAuditLog(actor, 40) : [];
   const isAdmin = can(actor, "household.manage");
 
@@ -418,6 +429,129 @@ export default async function SettingsPage({
               </form>
             ) : null}
           </Card>
+
+          {canManageWorkflows ? (
+            <Card
+              title="Image workflows"
+              subtitle="ComfyUI API-format workflows. Ports stay private; only enabled workflows can run."
+            >
+              <div className="mb-3 rounded-xl bg-sand/60 p-3 text-[11px] text-ink-soft">
+                <p>
+                  <strong>ComfyUI:</strong> {comfyuiConfigured() ? "configured" : "not configured"} · queue {queue.queued} waiting,{" "}
+                  {queue.running} running.
+                </p>
+                <p className="mt-1">
+                  Set <code>COMFYUI_URL</code> (for example http://127.0.0.1:8188) and <code>COMFYUI_CHECKPOINT</code> on the
+                  Mac Studio. Placeholders: <code>{"{{PROMPT}}, {{NEGATIVE_PROMPT}}, {{SEED}}, {{WIDTH}}, {{HEIGHT}}, {{STEPS}}, {{CFG}}, {{DENOISE}}, {{IMAGE}}, {{MASK}}, {{CHECKPOINT}}, {{SCALE}}"}</code>.
+                  Use ComfyUI&apos;s “Export (API)” JSON, not the UI workflow JSON.
+                </p>
+              </div>
+
+              <div className="space-y-3">
+                {workflows.length === 0 ? <p className="text-xs text-ink-soft">No workflows yet. Install a sample below.</p> : null}
+                {workflows.map((workflow) => (
+                  <details key={workflow.id} className="rounded-xl border border-black/5 bg-white p-3 text-xs">
+                    <summary className="cursor-pointer">
+                      <span className="font-semibold text-ink">{workflow.name}</span>{" "}
+                      <span className="text-ink-soft">
+                        · {workflow.operation.replace(/_/g, " ")} · {workflow.enabled === 1 ? "enabled" : "disabled"}
+                      </span>
+                    </summary>
+                    {workflow.description ? <p className="mt-1 text-[11px] text-ink-soft">{workflow.description}</p> : null}
+                    <form action={toggleWorkflowAction} className="mt-2 flex items-center gap-2">
+                      <input type="hidden" name="workflowId" value={workflow.id} />
+                      <input type="hidden" name="redirectTo" value="/settings" />
+                      <label className="flex items-center gap-1 text-[11px]">
+                        <input type="checkbox" name="enabled" defaultChecked={workflow.enabled === 1} /> Enabled
+                      </label>
+                      <button type="submit" className="btn-ghost px-2 py-1 text-[11px]">
+                        Update status
+                      </button>
+                    </form>
+                    <form action={saveWorkflowAction} className="mt-2 space-y-2">
+                      <input type="hidden" name="workflowId" value={workflow.id} />
+                      <input type="hidden" name="redirectTo" value="/settings" />
+                      <div className="grid gap-2 sm:grid-cols-2">
+                        <input name="name" defaultValue={workflow.name} className="field mt-0 py-1" />
+                        <select name="operation" defaultValue={workflow.operation} className="field mt-0 py-1">
+                          {WORKFLOW_OPERATIONS.map((operation) => (
+                            <option key={operation.value} value={operation.value}>
+                              {operation.label}
+                            </option>
+                          ))}
+                        </select>
+                        <input name="modelLabel" defaultValue={workflow.model_label ?? ""} placeholder="Model label" className="field mt-0 py-1" />
+                        <label className="flex items-center gap-1 text-[11px]">
+                          <input type="checkbox" name="enabled" defaultChecked={workflow.enabled === 1} /> Enabled
+                        </label>
+                      </div>
+                      <input name="description" defaultValue={workflow.description ?? ""} placeholder="Description" className="field mt-0 py-1" />
+                      <textarea
+                        name="workflowJson"
+                        rows={8}
+                        defaultValue={JSON.stringify(JSON.parse(workflow.workflow_json), null, 2)}
+                        className="field mt-0 font-mono text-[10px]"
+                        spellCheck={false}
+                      />
+                      <div className="flex gap-2">
+                        <button type="submit" className="btn-secondary px-2 py-1 text-[11px]">
+                          Save workflow
+                        </button>
+                      </div>
+                    </form>
+                    <form action={deleteWorkflowAction} className="mt-1">
+                      <input type="hidden" name="workflowId" value={workflow.id} />
+                      <input type="hidden" name="redirectTo" value="/settings" />
+                      <button type="submit" className="text-[11px] text-red-700 hover:underline">
+                        Delete workflow
+                      </button>
+                    </form>
+                  </details>
+                ))}
+              </div>
+
+              <form action={saveWorkflowAction} className="mt-4 space-y-2 border-t border-black/5 pt-3">
+                <input type="hidden" name="redirectTo" value="/settings" />
+                <p className="text-xs font-semibold text-ink">Add a workflow</p>
+                <div className="grid gap-2 sm:grid-cols-2">
+                  <input name="name" required placeholder="Workflow name" className="field mt-0" />
+                  <select name="operation" className="field mt-0" defaultValue="text_to_image">
+                    {WORKFLOW_OPERATIONS.map((operation) => (
+                      <option key={operation.value} value={operation.value}>
+                        {operation.label}
+                      </option>
+                    ))}
+                  </select>
+                  <input name="modelLabel" placeholder="Model label (optional)" className="field mt-0" />
+                  <label className="flex items-center gap-1 text-[11px]">
+                    <input type="checkbox" name="enabled" /> Enable immediately (only after models are installed)
+                  </label>
+                </div>
+                <input name="description" placeholder="Description" className="field mt-0" />
+                <textarea name="workflowJson" rows={6} required placeholder="Paste ComfyUI API-format JSON here" className="field mt-0 font-mono text-[10px]" spellCheck={false} />
+                <button type="submit" className="btn-secondary">Add workflow</button>
+              </form>
+
+              <details className="mt-4 text-xs">
+                <summary className="cursor-pointer text-ink-soft hover:text-teal">Install a sample workflow</summary>
+                <div className="mt-2 space-y-2">
+                  {samples.map((sample) => (
+                    <form key={sample.id} action={installSampleWorkflowAction} className="flex items-center justify-between gap-2 rounded-xl border border-black/5 p-2">
+                      <input type="hidden" name="sampleId" value={sample.id} />
+                      <input type="hidden" name="redirectTo" value="/settings" />
+                      <div>
+                        <p className="font-semibold text-ink">{sample.name}</p>
+                        <p className="text-[10px] text-ink-soft">
+                          {sample.operation.replace(/_/g, " ")} · {sample.description}
+                        </p>
+                      </div>
+                      <button type="submit" className="btn-ghost px-2 py-1 text-[11px]">Add</button>
+                    </form>
+                  ))}
+                </div>
+              </details>
+            </Card>
+          ) : null}
 
           {can(actor, "integrations.manage") ? (
             <Card title="Integrations" subtitle="Only in-app features run today. Everything else is explicitly disabled until configured.">

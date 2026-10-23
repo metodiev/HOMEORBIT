@@ -63,6 +63,35 @@ import { markAllNotificationsRead, markNotificationRead } from "@/lib/domain/not
 import { recordAudit } from "@/lib/domain/audit";
 import { runProactiveChecks } from "@/lib/proactive/insights";
 import { updateIntegration } from "@/lib/domain/settings";
+import { createMemory, deleteMemory, updateAiProfile, updateMemory } from "@/lib/domain/ai-profile";
+import {
+  addAssetToAlbum,
+  createAlbum,
+  createUploadedAsset,
+  deleteAsset,
+  deleteAlbum,
+  shareAlbum,
+  shareAsset,
+  updateAssetMetadata,
+} from "@/lib/domain/media";
+import { cancelImageJob, enqueueImageJob } from "@/lib/images/queue";
+import {
+  createWorkflow,
+  deleteWorkflow,
+  installSampleWorkflow,
+  updateWorkflow,
+  type WorkflowOperation,
+} from "@/lib/domain/image-workflows";
+import { describePhoto } from "@/lib/domain/photos";
+import {
+  addMovieEntry,
+  deleteMovieEntry,
+  updateMovieEntry,
+  updateMoviePreferences,
+} from "@/lib/domain/movies";
+import { ValidationError } from "@/lib/errors";
+import { checkRateLimit } from "@/lib/auth/rate-limit";
+import { MAX_UPLOAD_BYTES } from "@/lib/media/storage";
 
 function text(form: FormData, key: string): string {
   return String(form.get(key) ?? "").trim();
@@ -83,6 +112,27 @@ function numberOrNull(form: FormData, key: string): number | null {
 function checked(form: FormData, key: string): boolean {
   const value = form.get(key);
   return value === "on" || value === "true" || value === "1";
+}
+
+async function uploadedFile(
+  form: FormData,
+  key: string,
+  required = true,
+): Promise<{ buffer: Buffer; filename: string } | null> {
+  const value = form.get(key);
+  if (!value || typeof value === "string" || !("arrayBuffer" in value)) {
+    if (required) throw new ValidationError("Choose an image to upload.");
+    return null;
+  }
+  const file = value as File;
+  if (file.size === 0) {
+    if (required) throw new ValidationError("The uploaded file is empty.");
+    return null;
+  }
+  if (file.size > MAX_UPLOAD_BYTES) {
+    throw new ValidationError(`Files must be at most ${Math.round(MAX_UPLOAD_BYTES / 1024 / 1024)} MB.`);
+  }
+  return { buffer: Buffer.from(await file.arrayBuffer()), filename: file.name || "upload" };
 }
 
 function localIso(form: FormData, key: string, timezone: string): string | null {
@@ -942,5 +992,346 @@ export async function createResetLinkAction(form: FormData): Promise<void> {
   await feedback(form, targetPath(form, "/settings"), () => {
     const token = createPasswordResetLink(actor, text(form, "memberId"));
     return `One-time reset link (valid 1 hour, share privately): /reset-password?token=${token}`;
+  });
+}
+
+/* ------------------------- personal AI profile ------------------------- */
+
+export async function updateAiProfileAction(form: FormData): Promise<void> {
+  const actor = await requireActor();
+  await feedback(form, targetPath(form, "/profile"), () => {
+    updateAiProfile(actor, {
+      persona: text(form, "persona"),
+      interests: text(form, "interests")
+        .split(/[\n,]/)
+        .map((interest) => interest.trim())
+        .filter(Boolean),
+      preferences: {
+        tone: text(form, "tone"),
+        detail: text(form, "detail"),
+        humor: text(form, "humor"),
+        language: text(form, "responseLanguage"),
+      },
+      provider: (text(form, "provider") || "auto") as "auto" | "ollama" | "openai" | "local",
+      model: optional(form, "model"),
+      shareFamilyKnowledge: checked(form, "shareFamilyKnowledge"),
+    });
+    return "AI profile updated.";
+  });
+}
+
+export async function saveMemoryAction(form: FormData): Promise<void> {
+  const actor = await requireActor();
+  await feedback(form, targetPath(form, "/profile"), () => {
+    createMemory(actor, {
+      content: text(form, "content"),
+      scope: (text(form, "scope") || "private") as "private" | "family",
+      category: text(form, "category") || "general",
+      tags: text(form, "tags")
+        .split(",")
+        .map((tag) => tag.trim())
+        .filter(Boolean),
+    });
+    return "Memory saved.";
+  });
+}
+
+export async function updateMemoryAction(form: FormData): Promise<void> {
+  const actor = await requireActor();
+  await feedback(form, targetPath(form, "/profile"), () => {
+    updateMemory(actor, text(form, "memoryId"), {
+      content: text(form, "content") || undefined,
+      category: text(form, "category") || undefined,
+      tags: text(form, "tags")
+        .split(",")
+        .map((tag) => tag.trim())
+        .filter(Boolean),
+      scope: (text(form, "scope") || undefined) as "private" | "family" | undefined,
+    });
+    return "Memory updated.";
+  });
+}
+
+export async function deleteMemoryAction(form: FormData): Promise<void> {
+  const actor = await requireActor();
+  await feedback(form, targetPath(form, "/profile"), () => {
+    deleteMemory(actor, text(form, "memoryId"));
+    return "Memory deleted.";
+  });
+}
+
+/* -------------------------------- media -------------------------------- */
+
+export async function uploadAssetAction(form: FormData): Promise<void> {
+  const actor = await requireActor();
+  const library = text(form, "library") === "photos" ? "photos" : "studio";
+  await feedback(form, library === "photos" ? "/photos" : "/studio", async () => {
+    checkRateLimit(`media-upload:${actor.id}`, 40, 3600);
+    const file = await uploadedFile(form, "file");
+    if (!file) throw new ValidationError("Choose an image to upload.");
+    const asset = await createUploadedAsset(actor, {
+      buffer: file.buffer,
+      filename: file.filename,
+      library,
+      caption: optional(form, "caption"),
+      tags: text(form, "tags")
+        .split(",")
+        .map((tag) => tag.trim())
+        .filter(Boolean),
+      takenAt: optional(form, "takenAt"),
+      albumId: optional(form, "albumId"),
+    });
+    return `Uploaded ${asset.original_filename ?? "image"} (${Math.round(asset.bytes / 1024)} KB).`;
+  });
+}
+
+export async function updateAssetAction(form: FormData): Promise<void> {
+  const actor = await requireActor();
+  await feedback(form, targetPath(form, "/studio"), () => {
+    updateAssetMetadata(actor, text(form, "assetId"), {
+      caption: optional(form, "caption"),
+      tags: form.has("tags")
+        ? text(form, "tags")
+            .split(",")
+            .map((tag) => tag.trim())
+            .filter(Boolean)
+        : undefined,
+      favorite: form.has("favoriteForm") ? checked(form, "favorite") : undefined,
+    });
+    return "Image details updated.";
+  });
+}
+
+export async function deleteAssetAction(form: FormData): Promise<void> {
+  const actor = await requireActor();
+  await feedback(form, targetPath(form, "/studio"), () => {
+    deleteAsset(actor, text(form, "assetId"));
+    return "Image moved to deleted storage and will be purged after the retention window.";
+  });
+}
+
+export async function shareAssetAction(form: FormData): Promise<void> {
+  const actor = await requireActor();
+  await feedback(form, targetPath(form, "/studio"), () => {
+    const memberIds = form.getAll("memberIds").map(String).filter(Boolean);
+    if (memberIds.length === 0) throw new ValidationError("Choose at least one family member.");
+    shareAsset(actor, text(form, "assetId"), memberIds);
+    return "Image shared with the selected family members.";
+  });
+}
+
+export async function createAlbumAction(form: FormData): Promise<void> {
+  const actor = await requireActor();
+  const library = text(form, "library") === "photos" ? "photos" : "studio";
+  await feedback(form, library === "photos" ? "/photos" : "/studio", () => {
+    createAlbum(actor, {
+      name: text(form, "name"),
+      visibility: (text(form, "visibility") || "private") as "private" | "family" | "selected",
+      memberIds: form.getAll("memberIds").map(String).filter(Boolean),
+    });
+    return "Album created.";
+  });
+}
+
+export async function shareAlbumAction(form: FormData): Promise<void> {
+  const actor = await requireActor();
+  await feedback(form, targetPath(form, "/photos"), () => {
+    shareAlbum(
+      actor,
+      text(form, "albumId"),
+      form.getAll("memberIds").map(String).filter(Boolean),
+      (text(form, "visibility") || undefined) as "private" | "family" | "selected" | undefined,
+    );
+    return "Album sharing updated.";
+  });
+}
+
+export async function addAssetToAlbumAction(form: FormData): Promise<void> {
+  const actor = await requireActor();
+  await feedback(form, targetPath(form, "/studio"), () => {
+    addAssetToAlbum(actor, text(form, "albumId"), text(form, "assetId"));
+    return "Image added to the album.";
+  });
+}
+
+export async function deleteAlbumAction(form: FormData): Promise<void> {
+  const actor = await requireActor();
+  await feedback(form, targetPath(form, "/photos"), () => {
+    deleteAlbum(actor, text(form, "albumId"));
+    return "Album deleted.";
+  });
+}
+
+/* ----------------------------- image jobs ----------------------------- */
+
+export async function enqueueImageJobAction(form: FormData): Promise<void> {
+  const actor = await requireActor();
+  await feedback(form, targetPath(form, "/studio"), async () => {
+    checkRateLimit(`image-jobs:${actor.id}`, 20, 3600);
+    const maskFile = await uploadedFile(form, "mask", false);
+    let maskAssetId: string | null = null;
+    if (maskFile) {
+      const mask = await createUploadedAsset(actor, {
+        buffer: maskFile.buffer,
+        filename: maskFile.filename,
+        library: "studio",
+        caption: "Mask for image edit",
+        tags: ["mask"],
+      });
+      maskAssetId = mask.id;
+    }
+    const job = enqueueImageJob(actor, {
+      operation: (text(form, "operation") || "text_to_image") as WorkflowOperation,
+      prompt: text(form, "prompt"),
+      negativePrompt: optional(form, "negativePrompt") ?? undefined,
+      workflowId: optional(form, "workflowId"),
+      sourceAssetId: optional(form, "sourceAssetId"),
+      params: {
+        width: numberOrNull(form, "width") ?? undefined,
+        height: numberOrNull(form, "height") ?? undefined,
+        steps: numberOrNull(form, "steps") ?? undefined,
+        cfg: numberOrNull(form, "cfg") ?? undefined,
+        denoise: numberOrNull(form, "denoise") ?? undefined,
+        scale: numberOrNull(form, "scale") ?? undefined,
+        seed: numberOrNull(form, "seed") ?? undefined,
+        checkpoint: optional(form, "checkpoint") ?? undefined,
+        maskAssetId,
+        albumId: optional(form, "albumId"),
+        library: "studio",
+      },
+    });
+    return `Image job ${job.id} queued. It runs one at a time to protect the Mac Studio.`;
+  });
+}
+
+export async function cancelImageJobAction(form: FormData): Promise<void> {
+  const actor = await requireActor();
+  await feedback(form, targetPath(form, "/studio"), () => {
+    cancelImageJob(actor, text(form, "jobId"));
+    return "Queued image job cancelled.";
+  });
+}
+
+/* --------------------------- image workflows --------------------------- */
+
+export async function saveWorkflowAction(form: FormData): Promise<void> {
+  const actor = await requireActor();
+  await feedback(form, targetPath(form, "/settings"), () => {
+    const workflowId = optional(form, "workflowId");
+    const input = {
+      name: text(form, "name"),
+      operation: text(form, "operation") as WorkflowOperation,
+      workflowJson: text(form, "workflowJson"),
+      modelLabel: optional(form, "modelLabel"),
+      description: optional(form, "description"),
+      enabled: checked(form, "enabled"),
+    };
+    if (workflowId) {
+      updateWorkflow(actor, workflowId, input);
+      return "Workflow updated.";
+    }
+    createWorkflow(actor, input);
+    return "Workflow created. Keep it disabled until its ComfyUI model files are installed.";
+  });
+}
+
+export async function toggleWorkflowAction(form: FormData): Promise<void> {
+  const actor = await requireActor();
+  await feedback(form, targetPath(form, "/settings"), () => {
+    updateWorkflow(actor, text(form, "workflowId"), { enabled: checked(form, "enabled") });
+    return "Workflow status updated.";
+  });
+}
+
+export async function installSampleWorkflowAction(form: FormData): Promise<void> {
+  const actor = await requireActor();
+  await feedback(form, targetPath(form, "/settings"), () => {
+    installSampleWorkflow(actor, text(form, "sampleId"));
+    return "Sample workflow added (disabled). Review its model files and enable it when ready.";
+  });
+}
+
+export async function deleteWorkflowAction(form: FormData): Promise<void> {
+  const actor = await requireActor();
+  await feedback(form, targetPath(form, "/settings"), () => {
+    deleteWorkflow(actor, text(form, "workflowId"));
+    return "Workflow deleted. Existing jobs keep their history.";
+  });
+}
+
+/* ------------------------------- photos ------------------------------- */
+
+export async function describePhotoAction(form: FormData): Promise<void> {
+  const actor = await requireActor();
+  await feedback(form, targetPath(form, "/photos"), async () => {
+    checkRateLimit(`photo-describe:${actor.id}`, 30, 3600);
+    const result = await describePhoto(actor, text(form, "assetId"));
+    return result.embedded
+      ? "Photo described by the local vision model and indexed for semantic search."
+      : "Photo described by the local vision model. Set OLLAMA_EMBED_MODEL to enable semantic search.";
+  });
+}
+
+/* ------------------------------- movies ------------------------------- */
+
+export async function addMovieAction(form: FormData): Promise<void> {
+  const actor = await requireActor();
+  await feedback(form, targetPath(form, "/movies"), async () => {
+    const entry = await addMovieEntry(actor, {
+      tmdbId: Number(text(form, "tmdbId")),
+      status: (text(form, "status") || "watchlist") as "watchlist" | "watched",
+      favorite: checked(form, "favorite"),
+      rating: numberOrNull(form, "rating"),
+      notes: optional(form, "notes"),
+    });
+    return `Saved “${entry.title}” to your ${entry.status === "watched" ? "watched list" : "watchlist"}.`;
+  });
+}
+
+export async function updateMovieAction(form: FormData): Promise<void> {
+  const actor = await requireActor();
+  await feedback(form, targetPath(form, "/movies"), () => {
+    updateMovieEntry(actor, text(form, "entryId"), {
+      status: (text(form, "status") || undefined) as "watchlist" | "watched" | undefined,
+      favorite: form.has("favoriteForm") ? checked(form, "favorite") : undefined,
+      rating: numberOrNull(form, "rating"),
+      notes: optional(form, "notes"),
+    });
+    return "Movie list updated.";
+  });
+}
+
+export async function deleteMovieAction(form: FormData): Promise<void> {
+  const actor = await requireActor();
+  await feedback(form, targetPath(form, "/movies"), () => {
+    deleteMovieEntry(actor, text(form, "entryId"));
+    return "Movie removed from your list.";
+  });
+}
+
+export async function updateMoviePreferencesAction(form: FormData): Promise<void> {
+  const actor = await requireActor();
+  await feedback(form, targetPath(form, "/movies"), () => {
+    updateMoviePreferences(actor, {
+      genres: form
+        .getAll("genreIds")
+        .map(String)
+        .map(Number)
+        .filter((id) => Number.isInteger(id) && id > 0),
+      avoidGenres: form
+        .getAll("avoidGenreIds")
+        .map(String)
+        .map(Number)
+        .filter((id) => Number.isInteger(id) && id > 0),
+      languages: text(form, "languages")
+        .split(",")
+        .map((code) => code.trim().toLowerCase())
+        .filter(Boolean),
+      favoriteServices: text(form, "favoriteServices")
+        .split(",")
+        .map((name) => name.trim())
+        .filter(Boolean),
+    });
+    return "Movie preferences updated.";
   });
 }

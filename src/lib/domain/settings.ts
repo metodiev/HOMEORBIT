@@ -369,6 +369,20 @@ export function exportAccountData(actor: Actor): Record<string, unknown> {
     "SELECT m.* FROM agent_messages m JOIN agent_conversations c ON c.id = m.conversation_id WHERE c.member_id = ?",
     [actor.id],
   );
+  const memories = all("SELECT * FROM member_memories WHERE member_id = ?", [actor.id]);
+  const media = all(
+    `SELECT id, kind, library, original_filename, mime_type, bytes, tags_json, description, caption, favorite,
+            metadata_json, taken_at, created_at, deleted_at
+     FROM media_assets WHERE owner_member_id = ?`,
+    [actor.id],
+  );
+  const albums = all("SELECT * FROM albums WHERE owner_member_id = ?", [actor.id]);
+  const movies = all("SELECT * FROM movie_entries WHERE member_id = ?", [actor.id]);
+  const imageJobs = all(
+    `SELECT id, operation, status, prompt, error, result_asset_id, progress, created_at, finished_at
+     FROM image_jobs WHERE member_id = ?`,
+    [actor.id],
+  );
   recordAudit(actor, "account.exported", "member", actor.id);
   return {
     exportedAt: nowIso(),
@@ -380,6 +394,14 @@ export function exportAccountData(actor: Actor): Record<string, unknown> {
     notifications,
     conversations,
     messages,
+    memories,
+    media: (media as Record<string, unknown>[]).map((asset) => ({
+      ...asset,
+      downloadPath: `/api/media/${String(asset.id)}?download=1`,
+    })),
+    albums,
+    movies,
+    imageJobs,
   };
 }
 
@@ -397,13 +419,23 @@ export function deleteOwnAccount(actor: Actor, password: string): void {
     }
   }
   recordAudit(actor, "account.deleted", "member", actor.id);
-  // Anonymise instead of hard-deleting so household history keeps referential
-  // integrity while the person loses all access and personal data.
+  const timestamp = nowIso();
+  // Remove personal AI data immediately; media stays soft-deleted until the
+  // retention purge removes the files. Household history keeps referential
+  // integrity through an anonymised member row.
+  run("DELETE FROM member_memories WHERE member_id = ?", [actor.id]);
+  run("UPDATE media_assets SET deleted_at = ? WHERE owner_member_id = ? AND deleted_at IS NULL", [timestamp, actor.id]);
+  run("UPDATE albums SET deleted_at = ? WHERE owner_member_id = ? AND deleted_at IS NULL", [timestamp, actor.id]);
+  run("DELETE FROM asset_shares WHERE member_id = ?", [actor.id]);
+  run("DELETE FROM album_shares WHERE member_id = ?", [actor.id]);
+  run("DELETE FROM agent_conversations WHERE member_id = ?", [actor.id]);
   run(
     `UPDATE members SET email = NULL, password_hash = NULL, name = 'Deleted member', avatar = '👤',
       relationship = NULL, birthday = NULL, notification_prefs_json = '{}', permission_overrides_json = '{}',
-      dashboard_prefs_json = '{}', deactivated_at = ?, updated_at = ? WHERE id = ?`,
-    [nowIso(), nowIso(), actor.id],
+      dashboard_prefs_json = '{}', persona = NULL, interests_json = '[]', ai_preferences_json = '{}',
+      ai_model = NULL, ai_provider = 'local', share_family_knowledge = 0, movie_preferences_json = '{}',
+      deactivated_at = ?, updated_at = ? WHERE id = ?`,
+    [timestamp, timestamp, actor.id],
   );
   revokeAllSessionsForMember(actor.id);
 }

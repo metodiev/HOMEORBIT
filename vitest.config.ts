@@ -1,4 +1,5 @@
 import { defineConfig } from "vitest/config";
+import os from "node:os";
 import path from "node:path";
 
 export default defineConfig({
@@ -7,6 +8,9 @@ export default defineConfig({
     include: ["tests/**/*.test.ts"],
     fileParallelism: false,
     testTimeout: 20000,
+    env: {
+      MEDIA_STORAGE_PATH: path.join(os.tmpdir(), "homeorbit-vitest-media"),
+    },
   },
   resolve: {
     alias: {

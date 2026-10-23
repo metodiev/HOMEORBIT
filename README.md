@@ -1,26 +1,28 @@
-# HomeOrbit — your family's AI assistant
+# HomeOrbit — a private family AI platform
 
-HomeOrbit is a self-hosted family operating system: shared and private calendars, school runs,
-deliveries, shopping, meals, notes and holidays — coordinated by a tool-using AI assistant that
-works with real family data and asks before it acts.
+HomeOrbit is a self-hosted family operating system and private AI platform for a Mac Studio. It
+combines shared and private calendars, school runs, deliveries, shopping, meals, notes, trips and
+holidays with per-person AI profiles, isolated memories, a local Ollama model selector, a ComfyUI
+Image Studio, a private photo library, real movie data and an authorized web-research toolset.
 
-This repository is a complete, runnable first version, not a mockup. Every button is connected to
-validated server-side code and SQLite persistence. Where an external service is not configured,
-HomeOrbit says so instead of pretending.
+It is a working application, not a mockup. Every action is validated and authorized on the server,
+stored in SQLite, and logged. Where a model server or external source is not configured, HomeOrbit
+says so and does not invent a result.
 
 ---
 
 ## Quick start
 
-Requirements: **Node.js 22.17+** and npm.
+Requirements: **Node.js 22.17+**, npm, and macOS/Linux/Windows for development. The production
+target is a Mac Studio with 64 GB unified memory.
 
 ```bash
 npm install
-npm run db:seed      # creates data/homeorbit.db and a demo household
+npm run db:seed      # creates data/homeorbit.db and the demo household
 npm run dev          # http://localhost:3000
 ```
 
-Sign in with a demo account (all demo accounts use the same password):
+Demo accounts (same password for all):
 
 | Account | Role | Password |
 | --- | --- | --- |
@@ -29,8 +31,7 @@ Sign in with a demo account (all demo accounts use the same password):
 | `alex@homeorbit.demo` | Teenager | `OrbitDemo123!` |
 | `elena@homeorbit.demo` | Invited relative | `OrbitDemo123!` |
 
-Mia, Sofia, Nikola and Lora are managed profiles without sign-in accounts, exactly like children
-or relatives who do not have an email address.
+Mia, Sofia, Nikola and Lora are managed profiles without sign-in accounts.
 
 Reset the demo at any time:
 
@@ -45,278 +46,475 @@ npm run build
 npm start
 ```
 
-The database lives at `data/homeorbit.db` by default. Set `HOMEORBIT_DB_PATH` to use another
-location (recommended in production, on a persistent volume).
+The database lives at `data/homeorbit.db` by default. Set `HOMEORBIT_DB_PATH` to another location.
+Uploaded and generated images live under `data/media` by default; set `MEDIA_STORAGE_PATH` to a
+persistent volume and back it up together with the database.
 
 ---
 
 ## What is implemented
 
-### Foundation and security
+### Personal AI profiles and memories
 
-- ✅ Household registration, sign-in, sign-out, invitations, password reset (self-service in
-  development and one-time links from an administrator in production), account export, and account
-  deletion by anonymisation with immediate session revocation.
-- ✅ Eight seeded profiles (six primary members plus two invited relatives), configurable names,
-  colours, avatars, relationships, time zones, locales and birthdays.
-- ✅ Role-based permissions enforced **server-side**: every domain function receives the signed-in
-  actor and checks capabilities and resource-level access before reading or writing.
-- ✅ Private events are visible only to their creator. Guardians cannot read another adult's
-  private event or private note.
-- ✅ Personal calendars are private; sharing is explicit. Guardians can coordinate a child's
-  calendar but not another adult's.
-- ✅ Household-level data isolation on every query.
-- ✅ scrypt password hashing, hashed session tokens in HTTP-only cookies, 30-day sessions,
-  rate-limited sign-in/reset/invite/agent endpoints.
-- ✅ Audit log for sensitive actions, plus a per-tool execution log.
-- ✅ Security headers, request validation (Zod) on every agent tool, 2 MB ICS limit, 4,000-character
-  agent message limit.
-- ✅ Prompt-injection guardrail: tool output (notes, imported calendar text) is treated as
-  untrusted data, never as instructions.
+- ✅ Per-member AI profile: persona/instructions, interests, tone/detail/humour preferences, answer
+  language, provider choice and model name.
+- ✅ Configurable model selector: Auto (local Ollama first), Ollama only, external
+  OpenAI-compatible, or the built-in deterministic assistant. The UI labels local versus external
+  inference, vision and embedding availability.
+- ✅ Explicit long-term memories with private or family scope, category and tags.
+- ✅ Private memories are queryable only by their owner, including in the assistant prompt context.
+- ✅ Family knowledge requires an explicit per-member opt-in (`share_family_knowledge`) and is hidden
+  from invited-relative (guest) accounts. Only the owner can edit or delete a memory. Revoking the
+  opt-in immediately converts the member's family memories back to private.
+- ✅ Memory review, edit, delete and add UI at `/profile`. The assistant has `save_memory`,
+  `list_memories`, `update_memory` and `delete_memory` (confirmation required) tools.
+- ✅ Account export includes memories, media metadata, albums, movie entries and image jobs. Account
+  deletion removes memories, conversations and AI preferences and soft-deletes the member's media.
 
-### Family organiser
+### Local AI architecture
 
-- ✅ **Dashboard** "Today in our family": daily briefing, agenda, seven-day strip, proactive
-  attention list, school-run status, approvals, activity feed, quick add, and per-member widget
-  preferences.
-- ✅ **Calendars**: month, week and day views; personal/shared/colour-coded calendars; explicit
-  sharing; events with participants, location, notes, visibility, travel/prep time, reminders,
-  recurrence (daily/weekly/monthly/yearly with `BYDAY`, `INTERVAL`, `COUNT`, `UNTIL`), exceptions,
-  RSVP, conflict detection, common-free-slot search, ICS import/export with duplicate prevention.
-- ✅ **School & kids**: timetables, early dismissals, drop-offs/pickups, responsible adults,
-  confirmation and completion reported by a member, missing-arrangement alerts, guardian access.
-  "Confirmed" means the adults agreed the arrangement — never GPS proof of arrival. Location
-  tracking is intentionally absent.
-- ✅ **Deliveries & errands**: packages, expected windows, collection deadlines, pickup points,
-  collection codes, assigned collector, status history with the reporting member. Carrier tracking
-  APIs are not configured, so statuses are always member-reported.
-- ✅ **Calls**: missed calls, callbacks, reasons, deadlines and follow-up status.
-- ✅ **Shopping**: multiple lists, quantities, priorities, assignees, duplicate merging, bought
-  items, clear-bought, low-stock suggestions.
-- ✅ **Meals, recipes, inventory**: recipe storage, weekly meal plan, ingredient-to-shopping-list
-  generation, stock levels with minimum thresholds.
-- ✅ **Notes & documents**: shared/private/restricted notes, sensitive flags, per-person sharing,
-  search, category filters.
-- ✅ **Holidays & trips**: computed public holidays for Bulgaria, the US, UK, Germany, Greece and
-  Romania; trips, invitations for members and guests, RSVP summaries where **only `accepted`
-  counts**, polls, trip checklists.
-- ✅ **Notifications**: in-app, per-category mute, quiet hours (high urgency bypasses), dedupe keys,
-  read state, daily briefing and event reminders.
-- ✅ **Proactive intelligence**: conflicts, missing pickups, deliveries needing someone home,
-  unanswered invitations, birthdays, due tasks, urgent shopping, holidays without a plan, meal-plan
-  gaps.
-- ✅ **PWA**: installable manifest, offline caching of static assets only, responsive mobile layout
-  with bottom navigation.
-- ✅ **Localization**: English and Bulgarian navigation, dashboard and primary actions; per-member
-  language preference. Free-text data is not translated.
+- ✅ Ollama integration via its OpenAI-compatible `/v1/chat/completions` endpoint for tool use.
+- ✅ Native Ollama `/api/generate` for multimodal image descriptions and `/api/embeddings` for local
+  semantic photo search.
+- ✅ Provider-independent AI service layer with honest fallback: if Ollama or an external provider
+  is unreachable or returns malformed tool output, HomeOrbit reports the error and answers with the
+  built-in deterministic engine (without repeating a side effect that already happened).
+- ✅ Small local models receive a focused subset of tools for the request, plus deterministic
+  relative-date repair so “tomorrow” cannot silently become a year from the model's training data.
+- ✅ Authorized web research through SearXNG (preferred) or Brave Search, plus a server-side page
+  fetcher with SSRF protection: only public http(s) hosts, private/local addresses and
+  model/database ports blocked, redirect re-validation, 1 MB/15 s limits, and untrusted-content
+  marking.
+- ✅ External use is visible: assistant replies expose the provider, model, external-model flag and
+  external services used; web and TMDB tool calls are marked external in tool chips and logs.
+- ✅ Credentials stay on the server. The browser only receives model names and status, never API
+  keys or raw Ollama/ComfyUI/TMDB endpoints with credentials.
 
-### AI assistant
+### Image Studio and image editing
 
-- ✅ A real tool-using agent with **28 server-side tools** (`get_family_agenda`,
-  `search_calendars`, `check_member_availability`, `detect_schedule_conflicts`, `create_event`,
-  `update_event`, `cancel_event`, `request_event_confirmation`, task/shopping/package/call/reminder
-  tools, notes, polls, RSVPs, meals, trips, school pickups and weekly summaries). See
-  `/assistant` for the live list.
-- ✅ Provider abstraction with an **OpenAI-compatible** client (works with OpenAI, Azure OpenAI,
-  OpenRouter, Ollama, LM Studio, vLLM) and a **built-in deterministic assistant** that works with
-  no key at all. The UI clearly labels which mode is active.
-- ✅ Conversation history per member, tool execution audit, and honest failure handling: if the
-  model is unreachable, HomeOrbit falls back to the local engine and says so.
-- ✅ Consequential actions (cancel an event, edit someone else's event, reassign an existing
-  pickup, share sensitive notes) create an **approval request**. Nothing executes until a guardian
-  approves it. Children cannot approve their own requests.
-- ✅ The assistant refuses to invent availability, delivery status, arrivals or attendance, and
-  refuses unsupported integrations.
+- ✅ Complete `/studio`: text-to-image, image-to-image, inpainting, background replacement, object
+  removal, restoration and upscaling where an enabled workflow supports the operation.
+- ✅ Natural-language edit prompts. A source image and optional mask can be selected/uploaded.
+- ✅ ComfyUI API integration: health, image upload, `/prompt`, `/queue`, `/history/{id}`, `/view`.
+- ✅ A **serial image queue** (one job at a time across the household) with live status, progress,
+  queue position, errors, cancellation of queued jobs and result previews/downloads.
+- ✅ Workflow manager in Settings: add/edit ComfyUI API-format JSON, enable/disable, delete, and
+  install seven sample workflows (disabled until reviewed). Workflow JSON validation rejects UI
+  format (`nodes`/`links`) and unknown operations.
+- ✅ Recorded metadata per image: owner, creation date, kind, model/workflow label, operation,
+  prompt and external ComfyUI job id.
+- ✅ Original uploads and edited/generated results are separate assets linked by
+  `source_asset_id`; both versions are retained until explicitly deleted.
+- ✅ Private library, favourites, tags, captions, albums, per-image sharing with named members and
+  family albums. Family albums are hidden from guests.
+- ✅ Safe uploads: magic-byte validation for PNG/JPEG/WebP/GIF/AVIF, SVG rejected, filename and
+  MIME type never trusted, 25 MB default per-file limit, per-member quota, randomized server-side
+  paths and authenticated `/api/media/[assetId]` URLs.
+- ✅ Soft delete with configurable retention and a purge script.
+
+### Family photo library
+
+- ✅ Upload photos, captions, tags, dates, albums, favourites and metadata search by filename,
+  caption, description, tags and date.
+- ✅ Optional local vision descriptions (`OLLAMA_VISION_MODEL`) and local embeddings
+  (`OLLAMA_EMBED_MODEL`) for semantic search.
+- ✅ Descriptions are objective and instruction-resistant; the prompt explicitly forbids identifying
+  or naming people, guessing relationships, inferring sensitive traits or creating biometric
+  profiles.
+- ✅ No face recognition, no automatic person labels, no biometric identity profiles.
+- ✅ Search results are filtered through the same visibility rules as the gallery: private images,
+  direct shares and accessible albums only. Guests never see family-library content.
+- ✅ Download links, account export and documented retention/backup procedures.
+
+### Movie and entertainment assistant
+
+- ✅ Separate private watchlists, watched status, favourites, 1–10 ratings, notes, genres and
+  language/service preferences per member.
+- ✅ Real movie search and details from **TMDB** (external service), with a 24-hour detail cache.
+- ✅ Regional streaming availability from JustWatch via TMDB. “Verified” is shown only when provider
+  data exists for the configured region; recommendations show general movie information with an
+  explicit “not verified” note until detail is opened.
+- ✅ Personal recommendations use only the current member's preferences and exclude their existing
+  entries.
+- ✅ Explicit **Family movie night** aggregates genres from household favourites/high ratings and
+  hides titles anyone has already watched. Individual watchlists are not exposed.
+- ✅ With TMDB unset, no titles, dates or availability are invented; the UI explains what to
+  configure.
+
+### Shared and personal assistant
+
+- ✅ Unified chat with conversation history per member and a live tool list.
+- ✅ Server-side tools for the original family organiser plus memories, image generation/editing and
+  job status, image listing/updating/sharing, photo search/description, movie search/details/
+  recommendations/watchlists and web search/page fetch.
+- ✅ Consequential actions create approval requests: sharing a private image, deleting a memory,
+  cancelling events, changing pickups, etc. Approved actions execute **as the requester**, not as the
+  approving guardian, so ownership rules cannot be bypassed.
+- ✅ Tool results are displayed as returned. The assistant is instructed not to claim success when
+  a tool failed, queued a job, or requested approval.
+- ✅ Image job responses return the real job id and status; images appear only when ComfyUI finishes.
+
+### Hosting, security and operations
+
+- ✅ Custom scrypt authentication, hashed session tokens, HTTP-only/SameSite cookies, 30-day
+  sessions, CSRF-resistant server actions and explicit role/capability checks.
+- ✅ Household isolation on every domain query; cross-member private-resource checks at the
+  database and authorization layers.
+- ✅ Rate limits for sign-in, password reset, agent chat, uploads, image jobs and vision jobs.
+- ✅ Audit log for media, memories, albums, workflows, account and approval events; tool execution
+  log with external-service flag.
+- ✅ Security headers and a restrictive partial CSP (`base-uri`, `form-action`, `frame-ancestors`,
+  `object-src`); authenticated image routes add `nosniff`, sandbox CSP and private no-store caching.
+- ✅ Health endpoint with public minimal status and authenticated/token-gated diagnostics: database,
+  disk, queue, process memory, Ollama and ComfyUI reachability, optional integrations.
+- ✅ Backup script covering SQLite (WAL checkpointed) and the complete media root; restore
+  procedure below.
+- ✅ English and Bulgarian navigation, page headings and primary workflows; per-member locale.
+- ✅ Responsive web app/PWA with mobile navigation.
 
 ---
 
 ## Architecture
 
-```
+```text
 src/
-  app/                     Next.js App Router pages and API routes
-    (app)/                 authenticated product (dashboard, calendar, assistant, …)
-    api/agent/chat         agent endpoint
-    api/calendar/export    ICS export
-    api/account/export     account data export
-    api/proactive/run      cron entry point
-  components/              responsive shell, nav, UI primitives, chat
+  app/
+    (app)/                 authenticated product pages
+      dashboard, calendar, assistant, profile, studio, photos, movies,
+      tasks, shopping, deliveries, school, holidays, notes, household,
+      notifications, approvals, settings
+    api/
+      agent/chat           tool-using agent endpoint
+      media/[assetId]      authenticated image streaming/download
+      images/jobs          list/create queued image jobs
+      images/jobs/[jobId]  status/cancel
+      ollama/models        installed local models for the selector
+      health               public + detailed health
+      account/export       personal data export
+      calendar/export      ICS export
   lib/
-    db/                    SQLite connection, migrations, seed
-    auth/                  sessions, passwords, capabilities, resource access
-    domain/                events, tasks, shopping, packages, school, trips, notes, meals, …
-    agent/                 tool registry, local engine, provider, orchestrator
-    proactive/             insight rules, notifications, reminders
-    actions.ts             server actions used by forms
-tests/                     Vitest suite (53 tests)
-scripts/                   migrate, seed, reset, proactive
+    ai/                    Ollama, web research
+    agent/                 provider abstraction, runner, tools, local engine
+    domain/                authorization + business logic
+    images/                ComfyUI client, samples, serial job queue
+    media/                 file validation, paths, quotas, retention
+    movies/                TMDB client/cache
+    db/                    SQLite schema/migrations, rows, seed
+    auth/                  sessions, capabilities, resource access, rate limits
+  components/              UI, chat, image monitor, media cards, model selector
+scripts/                   migrate, seed, reset, proactive, backup, media purge
+tests/                     Vitest domain/security/queue integration tests
 ```
 
-- **Stack:** Next.js 15 (App Router), React 19, TypeScript, Tailwind CSS 4, SQLite via
-  `better-sqlite3`.
-- **Storage:** UTC timestamps; IANA time zones; local wall-clock recurrence expansion that is
-  DST-safe.
-- **Why SQLite:** a family-sized single-node deployment needs no extra service. The data layer is
-  isolated in `src/lib/db`, so a Postgres adapter is a contained change. It is not designed for
-  multi-instance horizontal scaling as shipped.
+### Data model additions (migration 5)
 
-### Data model (main entities)
+- `member_memories` — owner, private/family scope, category, content, tags, explicit source.
+- `media_assets` — owner, kind (`upload`/`generated`/`edited`), library, source asset, storage path,
+  detected MIME, checksum, tags, description, caption, metadata, soft-delete timestamp.
+- `albums`, `album_assets`, `album_shares`, `asset_shares` — private/family/selected sharing.
+- `image_workflows` — ComfyUI API workflow JSON, operation, model label, enabled flag.
+- `image_jobs` — owner, workflow, source asset, prompt, status, progress, error, provider job id,
+  queue position and result asset.
+- `asset_embeddings` — local embedding vectors for visible-photo semantic search.
+- `movie_entries`, `movie_cache` — private lists and TMDB detail cache.
+- Additional member AI/profile columns and provider/external-service metadata on messages and tool
+  executions.
 
-`households`, `members`, `sessions`, `invitations`, `password_reset_tokens`, `calendars`,
-`calendar_shares`, `events`, `event_participants`, `tasks`, `reminders`, `shopping_lists`,
-`shopping_items`, `packages`, `package_updates`, `calls`, `notes`, `note_shares`, `recipes`,
-`meal_plan`, `inventory_items`, `school_days`, `pickups`, `trips`, `trip_rsvps`, `polls`,
-`poll_options`, `poll_votes`, `notifications`, `approval_requests`, `agent_conversations`,
-`agent_messages`, `tool_executions`, `audit_log`, `integrations`.
+### Privacy model
 
-Migrations are append-only in `src/lib/db/schema.ts` and run automatically on first database use.
-Seed data is in `src/lib/db/seed.ts` — all names and data are fictional.
+| Data | Who can read | Who can write |
+| --- | --- | --- |
+| Private memory | Owner only | Owner |
+| Family memory | Household non-guests (if owner opted in) | Owner |
+| Private asset | Owner | Owner |
+| Directly shared asset | Owner + named recipients | Owner |
+| Family album asset | Household non-guests | Album owner |
+| Selected album asset | Owner + named recipients | Album owner |
+| Photo search results | Only assets visible to the searcher | n/a |
+| Movie list | Owner only | Owner |
+| AI conversation | Owner only | Owner |
+| Guest account | Only explicitly shared calendars/notes/trips; no media, memories, family knowledge, AI tools or image queue | as configured |
 
-### Roles
-
-| Role | Typical access |
-| --- | --- |
-| `parent` | Everything; guardians can approve consequential requests, manage members, integrations and audit |
-| `adult` | Calendars, tasks, shopping, packages, calls, notes, trips, meals, assistant; cannot manage the household |
-| `teen` | Own/shared calendars, tasks, shopping, private or shared notes, meals, assistant |
-| `child` | Shared information, own calendar, tasks, shopping, assistant (no sensitive notes or school admin) |
-| `relative` | Only calendars/trips explicitly shared with them; can RSVP; no household-wide data |
-
-Per-member `grant`/`revoke` capability overrides are stored and editable in **Settings → Manage
-member → Extra / revoked capabilities**.
+The assistant's retrieval passes through the same actor-scoped domain functions. A prompt or model
+cannot bypass these checks; tools execute with the signed-in member's actor.
 
 ---
 
-## AI provider configuration
+## AI setup on the Mac Studio
 
-The assistant works out of the box in local mode. To connect a model, copy `.env.example` to
-`.env.local` and set:
+### 1. Ollama
+
+Install and start Ollama (Homebrew example):
 
 ```bash
-AI_API_KEY=sk-...
+brew install ollama
+brew services start ollama
+```
+
+Pull a text model, a vision model and an embedding model. For 64 GB unified memory, useful starting
+points are an 8B–32B text model (fast and leaves room for ComfyUI) or a 70B Q4 model when ComfyUI is
+idle:
+
+```bash
+ollama pull llama3.1:8b
+ollama pull qwen2.5:32b
+ollama pull llama3.2-vision:11b
+ollama pull nomic-embed-text
+```
+
+Configure `.env.local`:
+
+```dotenv
+OLLAMA_BASE_URL=http://127.0.0.1:11434
+OLLAMA_MODEL=llama3.1:8b
+OLLAMA_VISION_MODEL=llama3.2-vision:11b
+OLLAMA_EMBED_MODEL=nomic-embed-text
+```
+
+Each member can choose a different installed model in **My AI → Ollama model**; the selector reads
+the live `/api/tags` list server-side. In “Auto” mode HomeOrbit prefers local Ollama when
+`OLLAMA_BASE_URL` or `OLLAMA_MODEL` is set, then an external key. Keep port 11434 bound to localhost
+or the private LAN; never forward it on the router. The app talks to Ollama server-side only.
+
+> Standard Ollama is a text/vision/embedding server, not a text-to-image engine. HomeOrbit therefore
+> uses ComfyUI for image generation and documents that limitation instead of pretending otherwise.
+
+### 2. External OpenAI-compatible fallback (optional)
+
+```dotenv
+AI_API_KEY=...
 AI_BASE_URL=https://api.openai.com/v1
 AI_MODEL=gpt-4o-mini
 ```
 
-Any OpenAI-compatible `/chat/completions` endpoint works. For local Ollama:
+When this is used, conversations leave the Mac Studio. The assistant UI shows “External model”, and
+tool chips mark external services. Leave it unset for a fully local household.
+
+### 3. ComfyUI
+
+Install ComfyUI (Desktop or the Python package) and keep it on localhost:
 
 ```bash
-AI_API_KEY=ollama
-AI_BASE_URL=http://127.0.0.1:11434/v1
-AI_MODEL=llama3.1:8b
+git clone https://github.com/comfyanonymous/ComfyUI.git
+cd ComfyUI
+python3 -m venv .venv
+source .venv/bin/activate
+pip install -r requirements.txt
+python main.py --listen 127.0.0.1 --port 8188
 ```
 
-The model receives a system prompt with the household context and the tool catalogue. Tool calls
-are executed server-side with the signed-in member's permissions — the model cannot bypass them.
-If the endpoint errors or times out (60 s), the request falls back to the local deterministic engine
-and clearly reports the fallback.
+Install a checkpoint in `ComfyUI/models/checkpoints` (for example an SDXL base checkpoint from its
+official source) and note the exact filename. Check the model licence before family use.
+
+Configure:
+
+```dotenv
+COMFYUI_URL=http://127.0.0.1:8188
+COMFYUI_TIMEOUT_SECONDS=300
+COMFYUI_CHECKPOINT=your-checkpoint-filename.safetensors
+```
+
+Then:
+
+1. Open **Settings → Image workflows**.
+2. Install the sample workflow for each operation you need (text-to-image, image-to-image, inpainting,
+   background replacement, object removal, restoration, upscale). Samples are installed disabled.
+3. Review the JSON, replace model/checkpoint names if needed, and enable each workflow.
+4. Open **Image Studio**, choose an operation and workflow, enter a prompt and (for edits) choose a
+   source image and optional mask.
+
+The workflow manager accepts **ComfyUI API-format JSON exported with “Save (API Format)”**, not the
+UI workflow (`nodes`/`links`). Supported placeholders:
+
+| Placeholder | Value |
+| --- | --- |
+| `{{PROMPT}}` | positive prompt |
+| `{{NEGATIVE_PROMPT}}` | negative prompt (empty string if absent) |
+| `{{SEED}}`, `{{STEPS}}`, `{{CFG}}` | sampler values |
+| `{{WIDTH}}`, `{{HEIGHT}}` | dimensions |
+| `{{DENOISE}}`, `{{SCALE}}` | edit strength / upscale factor |
+| `{{CHECKPOINT}}` | `COMFYUI_CHECKPOINT` or form override |
+| `{{MODEL}}` | `COMFYUI_MODEL` or form override |
+| `{{IMAGE}}` | uploaded source-image filename returned by ComfyUI |
+| `{{MASK}}` | uploaded mask filename returned by ComfyUI |
+
+If a placeholder is required but absent, that job fails with a clear error. Jobs are serialized
+globally so several family members cannot exhaust the GPU at once. ComfyUI ports must never be
+exposed publicly; HomeOrbit never sends the URL or workflow engine to the browser.
+
+### 4. Authorized web research
+
+Preferred: a household SearXNG instance with JSON output enabled.
+
+```dotenv
+SEARXNG_URL=http://127.0.0.1:8080
+```
+
+Alternative: Brave Search API.
+
+```dotenv
+BRAVE_SEARCH_API_KEY=...
+```
+
+The page fetcher only allows public http(s) URLs and blocks localhost, `.local`/`.internal` hosts,
+private IPv4/IPv6 ranges, credentials in URLs and common database/model ports (including 11434 and
+8188). It re-validates redirects, caps pages at 1 MB and 15 seconds, strips scripts/styles and
+marks all web content as untrusted. Without a provider, `web_search` returns “not configured” and
+never fabricates results.
+
+### 5. Real movie data
+
+Create a free TMDB account, request an API v4 read access token (preferred) and configure:
+
+```dotenv
+TMDB_READ_TOKEN=...
+# or TMDB_API_KEY=...
+TMDB_REGION=BG
+TMDB_LANGUAGE=en-US
+```
+
+The movie page uses TMDB for titles, overviews, genres and release dates, and TMDB/JustWatch for
+regional provider data. “Verified streaming availability” means provider data was returned for the
+configured region. Recommendations intentionally carry an “availability not verified” note until
+the detail view is opened. No movie data is generated locally.
 
 ---
 
-## Integrations
+## Environment variables
 
-Only in-app features are active. Everything else is explicitly **disabled** in
-`Settings → Integrations` until credentials and a worker exist.
+Copy [.env.example](./.env.example) to `.env.local` (development) or inject the values through your
+service manager (production).
 
-| Integration | Status | To enable |
+| Variable | Purpose | Default |
 | --- | --- | --- |
-| ICS import/export | ✅ working | No credentials. Import dedupes by UID and by title/start/end fingerprint |
-| Google Calendar sync | ◐ interface + settings only | Google Cloud OAuth client, `GOOGLE_CLIENT_ID`/`GOOGLE_CLIENT_SECRET`, consent + sync worker; map calendars |
-| Microsoft Outlook | ◐ interface + settings only | Azure app registration, `MICROSOFT_CLIENT_ID`/`MICROSOFT_CLIENT_SECRET`, Calendars.ReadWrite |
-| Apple / iCloud | ◐ read-only feeds only | Add an iCloud ICS feed URL; no public two-way API |
-| Email import | ◐ settings only | IMAP credentials, sanitisation, and a worker; imported content must remain untrusted |
-| Web push | ◐ settings only | VAPID keys (`WEB_PUSH_PUBLIC_KEY`/`WEB_PUSH_PRIVATE_KEY`) + push worker |
-| Telegram | ◐ settings only | `TELEGRAM_BOT_TOKEN` + verified chat ids per member |
-| WhatsApp | ◐ settings only | WhatsApp Business API account and approved templates |
-| Carrier tracking | ◐ settings only | Per-carrier API credentials; otherwise status stays member-reported |
-| Payments / bookings | ✗ intentionally absent | Would require a payment provider and an explicit approval workflow |
+| `HOMEORBIT_DB_PATH` | SQLite database file | `data/homeorbit.db` |
+| `SESSION_COOKIE_SECURE` | Force/disable secure session cookie | `true` in production |
+| `OLLAMA_BASE_URL` | Local Ollama server | `http://127.0.0.1:11434` |
+| `OLLAMA_MODEL` | Default text model | unset (built-in assistant) |
+| `OLLAMA_VISION_MODEL` | Local vision model for photo descriptions | unset |
+| `OLLAMA_EMBED_MODEL` | Local embedding model for semantic search | unset |
+| `OLLAMA_API_KEY` | Only if Ollama is behind an authenticated proxy | unset |
+| `AI_API_KEY`, `AI_BASE_URL`, `AI_MODEL` | Optional external OpenAI-compatible provider | unset |
+| `AI_API_KEY_HEADER` | Custom auth header name for external provider | `Authorization` |
+| `AI_JSON_MODE` | Set `true` to request JSON mode | `false` |
+| `COMFYUI_URL` | ComfyUI base URL | unset (Image Studio shows not configured) |
+| `COMFYUI_TIMEOUT_SECONDS` | Job timeout | `300` |
+| `COMFYUI_CHECKPOINT` | Default checkpoint filename | unset |
+| `COMFYUI_MODEL` | Optional model placeholder | unset |
+| `MEDIA_STORAGE_PATH` | Original/generated media root | `data/media` |
+| `MEDIA_MAX_UPLOAD_MB` | Per-file upload limit | `25` |
+| `MEDIA_QUOTA_MB` | Per-member storage quota | `2048` |
+| `MEDIA_RETENTION_DAYS` | Soft-deleted file retention before purge | `30` |
+| `SEARXNG_URL` | Private search provider | unset |
+| `BRAVE_SEARCH_API_KEY` | Brave Search provider | unset |
+| `TMDB_READ_TOKEN` / `TMDB_API_KEY` | Real movie data | unset |
+| `TMDB_REGION` | Streaming availability region | `BG` |
+| `TMDB_LANGUAGE` | TMDB metadata language | `en-US` |
+| `HEALTH_CHECK_TOKEN` | Bearer token for detailed health checks | unset |
+| `PROACTIVE_SECRET` | Cron secret for proactive checks | unset |
 
-Credentials belong in environment variables, never in the database or source control.
+Never commit `.env`, `.env.local`, backups, the database or the media folder. They are gitignored.
 
 ---
 
-## Scheduled checks (cron)
+## Running the platform on the Mac Studio
 
-HomeOrbit does not run its own daemon. Trigger proactive checks and reminders with either:
+### Production process
+
+1. Build once: `npm ci && npm run build`.
+2. Put secrets in the service environment (not in the repo).
+3. Run `npm start` under a process manager (pm2, launchd or a container). Example pm2:
+
+   ```bash
+   pm2 start npm --name homeorbit -- start
+   pm2 save
+   pm2 startup
+   ```
+
+4. Bind Next.js to localhost behind a reverse proxy (`npm start -- -H 127.0.0.1 -p 3000`) and let
+   Caddy/nginx/Tailscale Serve provide HTTPS.
+5. Keep Ollama (11434), ComfyUI (8188), SQLite and any SearXNG admin interface off the public
+   internet. Only the authenticated HTTPS web port should be reachable.
+6. Set `SESSION_COOKIE_SECURE=true` for HTTPS. On a trusted isolated LAN without TLS you may set it
+   to `false` for testing, but never expose that setup remotely.
+
+### Remote access
+
+Use a VPN or an authenticated gateway:
+
+- **Tailscale (recommended)**: install Tailscale on the Mac and family devices, use
+  `tailscale serve https / http://127.0.0.1:3000` (or a private tailnet address). Do not use a public
+  Funnel unless you have separately reviewed authentication and exposure.
+- **WireGuard/OpenVPN** into the home network, then browse to the Mac's private HTTPS address.
+- **Caddy with local TLS** for the home network, plus VPN for remote access.
+
+Test from outside your network: the only reachable service should be HTTPS through the VPN/gateway.
+Ports 3000 (if not proxied), 8188 and 11434 must be closed. Enable the macOS firewall and do not add
+router port-forwards for model servers.
+
+### Backups
 
 ```bash
-npm run proactive:run
+npm run backup
 ```
 
-or an HTTP call:
+The script checkpoints SQLite WAL, uses SQLite's online backup API, copies the complete media root
+to `data/backups/<timestamp>/`, writes a manifest and prints the restore instructions. Scripts read
+the process environment; if your settings live in `.env.local`, load them first with
+`set -a; source .env.local; set +a` (or schedule the command under the same service environment).
+Schedule it
+daily with cron/launchd and copy backups to an encrypted external disk or private NAS. Test a restore
+periodically:
 
-```bash
-curl -X POST http://localhost:3000/api/proactive/run \
-  -H "x-proactive-secret: $PROACTIVE_SECRET"
-```
+1. Stop the app.
+2. Copy the database file from the backup to `HOMEORBIT_DB_PATH` (or `data/homeorbit.db`).
+3. Copy `media/*` to `MEDIA_STORAGE_PATH` (or `data/media`).
+4. Start the app; run `npm run db:migrate` if the backup predates a schema migration.
+5. Verify sign-in, media access, queue history and memories.
 
-A signed-in administrator can also trigger it from the dashboard. Example cron entry (Linux):
+Media deletion is soft: run `npm run media:purge` after the retention window to remove files and
+their metadata. Backups are only as good as the last successful restore test.
 
-```cron
-*/15 * * * * cd /srv/homeorbit && PROACTIVE_SECRET=... npm run proactive:run >> /var/log/homeorbit.log 2>&1
-```
+### Monitoring and availability
 
-Notifications are deduplicated, so running the job frequently does not spam the family.
+- `GET /api/health` returns minimal `{ status, time }` without credentials.
+- Send `Authorization: Bearer $HEALTH_CHECK_TOKEN` (or sign in as an administrator) for details:
+  database, disk space, queue counts, memory/uptime, Ollama/ComfyUI reachability, live model count
+  and optional integration status.
+- A 503 means database or storage is degraded. Model-server outages are reported without failing the
+  whole app; the assistant falls back to the built-in engine and image jobs fail with their real
+  ComfyUI error.
+- Configure an external check (Uptime Kuma, healthchecks.io, etc.) against the private HTTPS health
+  URL and alert on 503. Do not expose the token in URLs or logs.
 
 ---
 
 ## Tests
 
 ```bash
-npm test           # 53 Vitest tests
+npm test          # 71 tests
 npm run typecheck
 npm run build
 ```
 
-The suite covers:
+Coverage includes authentication, permissions, private/shared calendars, trips/RSVP semantics,
+pickups, notifications, the agent's approval workflow, memory isolation, media ownership and guest
+access, family albums, path traversal and magic-byte validation, image queue serialization and
+per-member isolation, a complete ComfyUI job through a stub HTTP server, workflow validation,
+approved actions executing as the requester, focused tool-set selection for small local models,
+TMDB verification with mocked HTTP, malformed local model output falling back safely without
+repeating side effects, relative-date repair for weak local models, and SSRF blocking for web fetch.
 
-- private event visibility, cross-household isolation, sensitive notes and role capabilities;
-- authentication, invitations, password reset and password hashing;
-- conflict detection, safe availability windows, DST-safe recurrence and ICS import de-duplication;
-- the local agent answering from real data, creating real rows, falling back when the model is
-  unreachable, and never treating unconfirmed relatives as attending;
-- approval gating and guardian-only approval of a child's request;
-- notification quiet hours, category mutes and dedupe;
-- school-run creation, assignment, confirmation semantics and relative restrictions;
-- trip invitations, guest RSVPs, polls and checklist generation;
-- recurring tasks and assignment permissions.
+Manual cross-user checks worth repeating after changes:
 
-A browser-based end-to-end suite (Playwright) is not committed. The responsive UI, sign-in,
-calendar, agent, approvals and all main pages were manually smoke-tested in a real browser at
-desktop and mobile widths.
-
----
-
-## Deployment notes
-
-1. Use Node 22.17+ and a persistent volume for `HOMEORBIT_DB_PATH` (e.g. `/data/homeorbit.db`).
-2. Set a long random `PROACTIVE_SECRET` and serve over HTTPS (session cookies are `Secure` in
-   production).
-3. Back up the SQLite database together with its `-wal` file, or use `sqlite3 .backup`.
-4. Put self-registration behind your usual controls if this instance is public; anyone who can
-   reach `/register` can create a household.
-5. Configure the AI key if you want an LLM. Without it, the local assistant remains fully usable.
-6. Run `npm run db:seed` only for demos; it is skipped automatically if the demo household exists.
-
----
-
-## Known limitations
-
-- External calendar sync, email import, push, Telegram, WhatsApp and carrier tracking are designed
-  for but **not implemented**; only ICS import/export is real.
-- There is no outbound email service, so invitation and reset links are shown once in the app and
-  must be shared privately by an administrator. Self-service reset links are shown on screen only in
-  development. Wire an email provider before inviting people outside your household.
-- File attachments are represented as links on notes; binary upload/storage is not implemented.
-- Localization covers navigation, dashboard and primary actions; domain text and seeded content are
-  English.
-- Search uses SQL `LIKE`, not full-text indexing.
-- Recurrence supports a practical RFC 5545 subset with a 2,000-occurrence safety bound.
-- The built-in local assistant is deterministic and intentionally simpler than an LLM. It handles
-  agendas, availability, conflicts, shopping, reminders, notes, school runs, packages, holidays,
-  meals and summaries, but free-form reasoning requires a configured model.
-- SQLite is single-node; there is no built-in horizontal scaling or multi-tenant administration.
-- No location tracking, payments or travel booking — by design.
+1. Sign in as two adults. Create a private memory and a private image in one account; confirm the
+   other cannot see either in the UI, search or assistant tools.
+2. Share the image explicitly; confirm only the named member can open and download it.
+3. Create a family album; confirm a guest relative cannot see it.
+4. Queue two image jobs as two members; confirm one runs at a time and each member sees only their
+   own jobs.
+5. Open `/api/media/<id>` without a session and as a non-owner; both must fail.
+6. Run `npm run backup` on a test database, restore to a clean directory and verify media URLs.
 
 ---
 
@@ -324,11 +522,40 @@ desktop and mobile widths.
 
 | Command | Purpose |
 | --- | --- |
-| `npm run dev` | Development server |
-| `npm run build` / `npm start` | Production build / server |
-| `npm run db:seed` | Create demo household (idempotent) |
-| `npm run db:reset` | Delete the SQLite database |
-| `npm run db:migrate` | Apply migrations without seeding |
-| `npm run proactive:run` | Run proactive checks and due reminders |
-| `npm test` | Run the Vitest suite |
-| `npm run typecheck` | TypeScript check |
+| `npm run dev` | development server |
+| `npm run build` / `npm start` | production build / server |
+| `npm run typecheck` | TypeScript validation |
+| `npm test` / `npm run test:watch` | test suite |
+| `npm run db:migrate` | apply append-only migrations |
+| `npm run db:seed` | load the demo household (idempotent) |
+| `npm run db:reset` | delete the demo database (back up first in production) |
+| `npm run proactive:run` | run proactive checks from cron |
+| `npm run media:purge` | permanently purge soft-deleted media after retention |
+| `npm run backup` | checkpoint and copy database + media |
+
+---
+
+## Known limitations and deliberate boundaries
+
+- **ComfyUI models/workflows are not bundled.** The samples are templates; model files, custom
+  nodes and checkpoints must be installed and licensed by the household administrator.
+- **Ollama does not provide a standard text-to-image API.** ComfyUI is the supported local image
+  engine; no fake “Ollama image generation” path is offered.
+- **No face recognition or biometric identity profiles.** Vision descriptions are objective and
+  forbid person identification. A separate lawful, consented feature would be required before any
+  people-labelling capability could be considered.
+- **TMDB/JustWatch availability is regional and can change.** “Verified” means the source returned
+  provider data, not a guarantee of playback rights.
+- **External AI/search providers receive the content needed to answer the request.** Use local
+  Ollama and SearXNG for a fully local setup.
+- **SQLite is intended for one Next.js instance.** Do not scale horizontally without replacing the
+  queue and rate-limit store.
+- **No payment, booking, email/SMS or carrier integration is implemented.** Approvals do not turn
+  unsupported integrations into working ones.
+- **Web fetch validates DNS before connecting but is not a hardened browser sandbox.** A malicious
+  authoritative DNS could theoretically rebind between validation and connection; prefer a trusted
+  search provider and avoid fetching untrusted links. Model servers are blocked by host/port rules.
+- **Free-text user content is not machine-translated.** The interface and primary workflows support
+  English and Bulgarian; user-authored text remains as written.
+- **The optional integration placeholders remain disabled** until a real OAuth/worker implementation
+  is added. ICS export/import works today.

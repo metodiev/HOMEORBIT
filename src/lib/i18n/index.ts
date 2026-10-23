@@ -88,6 +88,18 @@ const en: Record<string, string> = {
   "notifications.title": "Notifications",
   "approvals.title": "Approvals",
   "settings.title": "Settings & family",
+  "nav.studio": "Image Studio",
+  "nav.photos": "Family photos",
+  "nav.movies": "Movie night",
+  "nav.profile": "My AI",
+  "studio.title": "Image Studio",
+  "studio.subtitle": "Local text-to-image and natural-language editing on your ComfyUI server.",
+  "photos.title": "Family photos",
+  "photos.subtitle": "Private photo library with albums, tags, local descriptions and semantic search.",
+  "movies.title": "Movie night",
+  "movies.subtitle": "Real movie data, private watchlists and an explicit family movie-night mode.",
+  "profile.title": "My AI",
+  "profile.subtitle": "Your persona, preferences and private long-term memories.",
 };
 
 const bg: Record<string, string> = {
@@ -178,6 +190,18 @@ const bg: Record<string, string> = {
   "notifications.title": "Известия",
   "approvals.title": "Потвърждения",
   "settings.title": "Настройки и семейство",
+  "nav.studio": "Студио за изображения",
+  "nav.photos": "Семейни снимки",
+  "nav.movies": "Филмова вечер",
+  "nav.profile": "Моят AI",
+  "studio.title": "Студио за изображения",
+  "studio.subtitle": "Локално генериране и редактиране с естествен език чрез вашия ComfyUI сървър.",
+  "photos.title": "Семейни снимки",
+  "photos.subtitle": "Лична фотобиблиотека с албуми, етикети, локални описания и семантично търсене.",
+  "movies.title": "Филмова вечер",
+  "movies.subtitle": "Реални филмови данни, лични списъци и изричен семеен режим за филмова вечер.",
+  "profile.title": "Моят AI",
+  "profile.subtitle": "Твоята персона, предпочитания и лични дългосрочни спомени.",
 };
 
 const dictionaries: Record<Locale, Record<string, string>> = { en, bg };

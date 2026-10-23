@@ -3,8 +3,22 @@
 import { useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 
-type ChatMessage = { id: string; role: "user" | "assistant"; content: string; createdAt?: string };
-type ToolRun = { name: string; status: "success" | "error" | "pending_approval" | "denied"; summary: string; approvalId?: string };
+type ChatMessage = {
+  id: string;
+  role: "user" | "assistant";
+  content: string;
+  createdAt?: string;
+  provider?: string | null;
+  model?: string | null;
+  externalServices?: string[];
+};
+type ToolRun = {
+  name: string;
+  status: "success" | "error" | "pending_approval" | "denied";
+  summary: string;
+  approvalId?: string;
+  externalService?: string;
+};
 
 const TOOL_STATUS: Record<ToolRun["status"], { label: string; className: string }> = {
   success: { label: "done", className: "bg-emerald-100 text-emerald-800" },
@@ -50,6 +64,7 @@ export function AssistantChat({
   const [error, setError] = useState<string | null>(null);
   const [toolRuns, setToolRuns] = useState<ToolRun[]>([]);
   const [mode, setMode] = useState<"llm" | "local" | null>(null);
+  const [meta, setMeta] = useState<{ providerLabel?: string; model?: string | null; externalModel?: boolean; externalServices?: string[] } | null>(null);
   const bottomRef = useRef<HTMLDivElement>(null);
 
   async function send(text: string) {
@@ -73,6 +88,10 @@ export function AssistantChat({
         reply?: string;
         mode?: "llm" | "local";
         toolRuns?: ToolRun[];
+        providerLabel?: string;
+        model?: string | null;
+        externalModel?: boolean;
+        externalServices?: string[];
       };
       if (!response.ok || payload.error) {
         setError(payload.error ?? "The assistant could not answer.");
@@ -88,6 +107,12 @@ export function AssistantChat({
       ]);
       setToolRuns(payload.toolRuns ?? []);
       setMode(payload.mode ?? null);
+      setMeta({
+        providerLabel: payload.providerLabel,
+        model: payload.model,
+        externalModel: payload.externalModel,
+        externalServices: payload.externalServices,
+      });
       router.refresh();
     } catch {
       setError("The assistant is unreachable. Check the server logs and try again.");
@@ -105,6 +130,20 @@ export function AssistantChat({
             {providerConfigured ? "AI model connected" : "Local assistant mode"}
           </span>
           {mode === "local" && providerConfigured ? <span className="text-ink-soft">fallback used for last reply</span> : null}
+          {meta?.externalModel ? (
+            <span className="rounded-full bg-amber-100 px-2.5 py-1 font-semibold text-amber-900">☁ External model</span>
+          ) : null}
+          {meta?.providerLabel ? (
+            <span className="text-ink-soft">
+              {meta.providerLabel}
+              {meta.model ? ` · ${meta.model}` : ""}
+            </span>
+          ) : null}
+          {meta?.externalServices?.length ? (
+            <span className="rounded-full bg-amber-50 px-2.5 py-1 text-amber-900">
+              External: {meta.externalServices.join(", ")}
+            </span>
+          ) : null}
         </div>
         <a href="/assistant?new=1" className="btn-ghost text-xs">
           + New conversation
@@ -147,6 +186,13 @@ export function AssistantChat({
                   <p className="mb-1 text-[10px] font-semibold uppercase tracking-[0.14em] text-ink-soft">HomeOrbit</p>
                 ) : null}
                 <MessageBody content={message.content} />
+                {message.role === "assistant" && (message.provider || message.model || message.externalServices?.length) ? (
+                  <p className="mt-2 border-t border-black/5 pt-1 text-[10px] text-ink-soft">
+                    {message.provider === "openai" ? "☁ External model" : message.provider ? `Provider: ${message.provider}` : ""}
+                    {message.model ? ` · ${message.model}` : ""}
+                    {message.externalServices?.length ? ` · External: ${message.externalServices.join(", ")}` : ""}
+                  </p>
+                ) : null}
               </div>
             </div>
           ))
@@ -175,6 +221,7 @@ export function AssistantChat({
             >
               {run.status === "pending_approval" ? "🛡️ " : run.status === "success" ? "✓ " : "⚠ "}
               {run.name.replace(/_/g, " ")} · {TOOL_STATUS[run.status].label}
+              {run.externalService ? ` · ${run.externalService} (external)` : ""}
             </span>
           ))}
           {toolRuns.some((run) => run.status === "pending_approval") ? (

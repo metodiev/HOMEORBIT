@@ -152,6 +152,12 @@ function helpText(actor: Actor): string {
       "“Remind me to call the school tomorrow at 9.”",
       "“Are the nephews coming on the holiday?”",
       "“Summarize our week.”",
+      "“Draw a cosy reading nook with autumn light.”",
+      "“Edit the beach photo to remove the bin.”",
+      "“What do you remember about my hobbies?”",
+      "“Recommend a movie for me.” / “Family movie night”",
+      "“Find photos from last Saturday tagged birthday.”",
+      "“Search the web for the museum opening times.”",
     ]),
     actor.role === "child"
       ? "Your account can see shared family information and add shopping items or tasks for yourself."
@@ -174,10 +180,221 @@ export async function runLocalAgent(
   };
   const lower = message.toLowerCase().trim();
   const prefix = options.providerError
-    ? `The AI provider could not be reached, so I used the built-in assistant. (${options.providerError})\n\n`
+    ? `The AI provider could not complete that reply, so I used the built-in assistant. (${options.providerError})\n\n`
     : "";
 
   if (!lower) return { reply: prefix + helpText(actor), tools };
+
+  // Image generation and editing (local ComfyUI queue)
+  if (/\b(image|picture|illustration|photo)\b/.test(lower) && /\b(job|jobs|status|progress|queue)\b/.test(lower)) {
+    const outcome = await call("list_image_jobs", { limit: 5 });
+    const jobs = (outcome.data as { jobs?: { jobId: string; status: string; progress: number; operation: string; error: string | null }[] } | undefined)?.jobs ?? [];
+    if (jobs.length === 0) return { reply: prefix + outcomeText(outcome), tools };
+    return {
+      reply:
+        prefix +
+        bullet(
+          jobs.map(
+            (job) =>
+              `${job.operation.replace(/_/g, " ")} — ${job.status} ${job.progress}%${job.error ? ` (${job.error})` : ""} [${job.jobId}]`,
+          ),
+        ),
+      tools,
+    };
+  }
+
+  if (/\b(draw|paint)\b/.test(lower) || (/\b(generate|create|make)\b/.test(lower) && /\b(image|picture|illustration|artwork)\b/.test(lower))) {
+    const prompt = message
+      .replace(/^(please\s+)?(generate|create|draw|make)\s+(me\s+)?(an?|some)\s+(image|picture|illustration|artwork|art)(\s+of)?\s*/i, "")
+      .replace(/^(please\s+)?(draw|paint|generate|create|make)\s+/i, "")
+      .trim();
+    const outcome = await call("generate_image", { prompt: prompt || message });
+    return { reply: prefix + outcomeText(outcome), tools };
+  }
+
+  if (/\b(edit|change|remove|replace|restore|upscale|enhance)\b/.test(lower) && /\b(photo|image|picture)\b/.test(lower)) {
+    const descriptor = /\b(?:the|my|this)?\s*([\p{L}\d' -]{2,40}?)\s+(?:photo|image|picture)\b/iu.exec(message)?.[1]?.trim();
+    let imageId: string | undefined;
+    if (!descriptor) {
+      const listed = await call("list_images", { limit: 2 });
+      const images = (listed.data as { images?: { assetId: string; caption: string | null }[] } | undefined)?.images ?? [];
+      if (images.length !== 1) {
+        return {
+          reply:
+            prefix +
+            "Tell me which image to edit by describing it (for example “edit the beach photo”) or open Image Studio to pick one.",
+          tools,
+        };
+      }
+      imageId = images[0].assetId;
+    }
+    const operation = /\bremove\b/.test(lower)
+      ? "remove_object"
+      : /\bbackground\b/.test(lower)
+        ? "background_replace"
+        : /\bupscal|enhance|enlarge\b/.test(lower)
+          ? "upscale"
+          : /\brestor|old|damaged\b/.test(lower)
+            ? "restore"
+            : "image_to_image";
+    const outcome = await call("edit_image", {
+      prompt: message,
+      operation,
+      ...(imageId ? { imageId } : { imageQuery: descriptor }),
+    });
+    return { reply: prefix + outcomeText(outcome), tools };
+  }
+
+  // Personal long-term memories
+  if (/^(what do you remember|what have you remembered|list (my )?memories|show (my )?memories)\b/.test(lower)) {
+    const outcome = await call("list_memories", { scope: "all" });
+    const memories = (outcome.data as { memories?: { content: string; scope: string }[] } | undefined)?.memories ?? [];
+    if (memories.length === 0) return { reply: prefix + "I do not have any saved memories for you yet.", tools };
+    return {
+      reply: prefix + bullet(memories.slice(0, 20).map((memory) => `${memory.scope === "family" ? "[family] " : ""}${memory.content}`)),
+      tools,
+    };
+  }
+
+  if (/\bforget\b/.test(lower) && /\b(memory|that|this)\b/.test(lower)) {
+    const query = message.replace(/^.*?\bforget\b/i, "").replace(/\b(memory|that|this)\b/gi, "").trim();
+    const listed = await call("list_memories", { scope: "private", query: query || undefined });
+    const memories = (listed.data as { memories?: { memoryId: string; content: string }[] } | undefined)?.memories ?? [];
+    if (memories.length === 0) return { reply: prefix + "I could not find a private memory matching that.", tools };
+    if (memories.length > 1) {
+      return {
+        reply:
+          prefix +
+          `I found ${memories.length} memories. Open Settings → AI profile to delete the exact one, or be more specific:\n${bullet(memories.slice(0, 5).map((memory) => memory.content))}`,
+        tools,
+      };
+    }
+    const outcome = await call("delete_memory", { memoryId: memories[0].memoryId });
+    return { reply: prefix + outcomeText(outcome), tools };
+  }
+
+  if (/\bremember (that|this|my|i|i'm|i am|we|our)\b/.test(lower) || /\bsave (this|that) to (my )?memory\b/.test(lower)) {
+    const body = message
+      .replace(/^.*?\bremember (that|this|my|i'm|i am|i|we|our)\b/i, "")
+      .replace(/^.*?\bsave (this|that) to (my )?memory\b/i, "")
+      .trim();
+    if (!body) return { reply: prefix + "What should I remember?", tools };
+    const outcome = await call("save_memory", { content: body, scope: "private" });
+    return { reply: prefix + outcomeText(outcome), tools };
+  }
+
+  // Movies (real TMDB data only)
+  if (/\bfamily movie night\b/.test(lower)) {
+    const outcome = await call("recommend_movies", { mode: "family", limit: 8 });
+    const data = outcome.data as { recommendations?: { title: string; year: number | null; overview: string }[] } | undefined;
+    const titles = data?.recommendations ?? [];
+    if (titles.length === 0) return { reply: prefix + outcomeText(outcome), tools };
+    return {
+      reply:
+        prefix +
+        bullet(titles.map((movie) => `${movie.title}${movie.year ? ` (${movie.year})` : ""} — ${movie.overview.slice(0, 140)}`)) +
+        `\n\n${outcome.summary}`,
+      tools,
+    };
+  }
+
+  if (/\b(recommend|suggest)\b/.test(lower) && /\b(movie|film|watch)\b/.test(lower)) {
+    const outcome = await call("recommend_movies", { mode: "personal", limit: 8 });
+    const data = outcome.data as { recommendations?: { title: string; year: number | null; overview: string }[] } | undefined;
+    const titles = data?.recommendations ?? [];
+    if (titles.length === 0) return { reply: prefix + outcomeText(outcome), tools };
+    return {
+      reply:
+        prefix +
+        bullet(titles.map((movie) => `${movie.title}${movie.year ? ` (${movie.year})` : ""} — ${movie.overview.slice(0, 140)}`)) +
+        `\n\n${outcome.summary}`,
+      tools,
+    };
+  }
+
+  if (/\b(watchlist|watched movies|my movies)\b/.test(lower)) {
+    const outcome = await call("list_movies", {});
+    const entries = (outcome.data as { entries?: { title: string; year: number | null; status: string; rating: number | null }[] } | undefined)?.entries ?? [];
+    if (entries.length === 0) return { reply: prefix + "Your movie list is empty.", tools };
+    return {
+      reply: prefix + bullet(entries.map((entry) => `${entry.title}${entry.year ? ` (${entry.year})` : ""} — ${entry.status}${entry.rating ? `, ${entry.rating}/10` : ""}`)),
+      tools,
+    };
+  }
+
+  if (/\b(movie|film)\b/.test(lower) && /\b(search|find|look up|called|about)\b/.test(lower)) {
+    const query = message.replace(/^.*?\b(search|find|look up)\b/i, "").replace(/\b(movie|film)\b/gi, "").replace(/\b(called|about)\b/gi, "").trim();
+    if (!query) return { reply: prefix + "Which movie should I look up?", tools };
+    const outcome = await call("search_movies", { query });
+    const results = (outcome.data as { results?: { id: number; title: string; year: number | null; overview: string }[] } | undefined)?.results ?? [];
+    if (results.length === 0) return { reply: prefix + outcomeText(outcome), tools };
+    return {
+      reply:
+        prefix +
+        bullet(results.map((movie) => `${movie.title}${movie.year ? ` (${movie.year})` : ""} [TMDB ${movie.id}] — ${movie.overview.slice(0, 140)}`)) +
+        `\n\n${outcome.summary}`,
+      tools,
+    };
+  }
+
+  // Photo library (visibility-filtered, no people identification)
+  if (/\bdescribe\b/.test(lower) && /\b(photo|picture|image)\b/.test(lower)) {
+    const descriptor = /\b(?:the|my|this)?\s*([\p{L}\d' -]{2,40}?)\s+(?:photo|picture|image)\b/iu.exec(message)?.[1]?.trim();
+    const listed = await call("list_images", { library: "photos", query: descriptor || undefined, limit: 2 });
+    const images = (listed.data as { images?: { assetId: string }[] } | undefined)?.images ?? [];
+    if (images.length !== 1) {
+      return { reply: prefix + "I need one specific photo. Describe it more precisely or open the photo library.", tools };
+    }
+    const outcome = await call("describe_photo", { imageId: images[0].assetId });
+    return { reply: prefix + outcomeText(outcome), tools };
+  }
+
+  if (/\b(photos?|pictures?)\b/.test(lower) && /\b(find|search|show|from|tagged)\b/.test(lower)) {
+    const query = message
+      .replace(/^.*?\b(find|search( for)?|show( me)?)\b/i, "")
+      .replace(/\b(photos?|pictures?)\b/gi, "")
+      .replace(/\b(from|tagged|with)\b/gi, " ")
+      .replace(/\s+/g, " ")
+      .trim();
+    const outcome = await call("search_photos", {
+      query: query || undefined,
+      dateFrom: parseDay(lower, actor) ?? undefined,
+    });
+    const photos = (outcome.data as { photos?: { assetId: string; caption: string | null; description: string | null; createdAt: string }[] } | undefined)?.photos ?? [];
+    if (photos.length === 0) return { reply: prefix + outcomeText(outcome), tools };
+    return {
+      reply:
+        prefix +
+        bullet(photos.slice(0, 12).map((photo) => `${photo.caption ?? photo.description ?? "Photo"} — ${formatDate(photo.createdAt, actor.locale, actor.timezone)} [${photo.assetId}]`)),
+      tools,
+    };
+  }
+
+  // Authorized web research (explicitly external)
+  if (/\b(search (the )?(web|internet)|google|look up online)\b/.test(lower)) {
+    const query = message.replace(/^.*?\b(search (the )?(web|internet)( for)?|google|look up online)\b/i, "").trim();
+    if (!query) return { reply: prefix + "What should I search the web for?", tools };
+    const outcome = await call("web_search", { query });
+    const results = (outcome.data as { results?: { title: string; url: string; snippet: string }[] } | undefined)?.results ?? [];
+    if (results.length === 0) return { reply: prefix + outcomeText(outcome), tools };
+    return {
+      reply:
+        prefix +
+        `External web results (untrusted):\n${bullet(results.map((result) => `${result.title} — ${result.url}\n${result.snippet}`))}`,
+      tools,
+    };
+  }
+
+  const explicitUrl = /\bhttps?:\/\/\S+\b/.exec(message)?.[0];
+  if (explicitUrl && /\b(open|read|fetch|summarize|summarise)\b/.test(lower)) {
+    const outcome = await call("fetch_web_page", { url: explicitUrl.replace(/[),.]+$/, "") });
+    const page = outcome.data as { title?: string; text?: string; url?: string } | undefined;
+    if (!outcome.ok || !page?.text) return { reply: prefix + outcomeText(outcome), tools };
+    return {
+      reply: `${prefix}External page (untrusted): ${page.title} — ${page.url}\n\n${page.text.slice(0, 4000)}`,
+      tools,
+    };
+  }
 
   // Weekly briefing / summary
   if (/\b(summar\w*|brief\w*|overview of (the )?week|what('s| is) happening this week)\b/.test(lower)) {

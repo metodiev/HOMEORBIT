@@ -1,13 +1,14 @@
 import Link from "next/link";
 import { requireActor } from "@/lib/auth/session";
 import { can } from "@/lib/auth/actor";
-import { providerStatus } from "@/lib/agent/provider";
+import { providerStatusFor } from "@/lib/agent/provider";
 import { listConversations, getConversationMessages } from "@/lib/agent/runner";
 import { toolSpecs } from "@/lib/agent/tools";
 import { AssistantChat } from "@/components/AssistantChat";
 import { Card, FeedbackBanner, PageHeader } from "@/components/ui";
 import { GuestRestricted } from "@/components/ui";
 import { formatDate } from "@/lib/util/dates";
+import { parseJson } from "@/lib/util/ids";
 import { intlLocale } from "@/lib/i18n";
 
 export const metadata = { title: "AI assistant" };
@@ -35,9 +36,12 @@ export default async function AssistantPage({
         role: message.role === "user" ? ("user" as const) : ("assistant" as const),
         content: message.content,
         createdAt: message.created_at,
+        provider: message.provider,
+        model: message.model,
+        externalServices: parseJson<string[]>(message.external_services_json, []),
       }))
     : [];
-  const status = providerStatus();
+  const status = providerStatusFor(actor);
   const tools = toolSpecs();
   const locale = intlLocale(actor.locale);
 
@@ -82,14 +86,37 @@ export default async function AssistantPage({
             </div>
           </Card>
 
-          <Card title="Mode" subtitle={status.configured ? "External model connected" : "Built-in deterministic engine"}>
+          <Card
+            title="Mode"
+            subtitle={
+              status.configured
+                ? status.location === "local"
+                  ? "Local Ollama model"
+                  : "External model connected"
+                : "Built-in deterministic engine"
+            }
+          >
             <p className="text-xs leading-relaxed text-ink-soft">{status.note}</p>
             {status.configured ? (
-              <p className="mt-2 text-[11px] text-ink-soft">
-                Model: <strong className="text-ink">{status.model}</strong>
-                <br />
-                Endpoint: <span className="break-all">{status.baseUrl}</span>
-              </p>
+              <div className="mt-2 space-y-1 text-[11px] text-ink-soft">
+                <p>
+                  Model: <strong className="text-ink">{status.model}</strong>
+                </p>
+                <p>
+                  <span
+                    className={`chip ${status.location === "local" ? "bg-teal-mist text-teal-deep" : "bg-amber-100 text-amber-900"}`}
+                  >
+                    {status.location === "local" ? "🏠 Local inference" : "☁ External service"}
+                  </span>
+                </p>
+                <p>
+                  Endpoint: <span className="break-all">{status.baseUrl}</span>
+                </p>
+                <p className="text-[10px]">
+                  Vision model: {status.visionModelAvailable ? "configured" : "not configured"} · Embeddings:{" "}
+                  {status.embeddingModelAvailable ? "configured" : "not configured"}
+                </p>
+              </div>
             ) : (
               <p className="mt-2 rounded-lg bg-amber-50 px-2 py-1.5 text-[11px] text-amber-900">
                 Local mode still reads and writes real data, proposes approvals and refuses unsupported integrations. It
@@ -111,6 +138,10 @@ export default async function AssistantPage({
               "Remind me to call the school tomorrow at 9.",
               "Are the nephews coming on the long weekend?",
               "Summarise our week.",
+              "Draw a cosy reading nook with autumn light.",
+              "What do you remember about my hobbies?",
+              "Recommend a movie for me.",
+              "Search the web for the museum opening times.",
             ]}
           />
         </Card>

@@ -9,6 +9,7 @@ import { executeApprovedTool } from "@/lib/agent/tools";
 import { all, get } from "@/lib/db";
 import type { EventRow, ShoppingItemRow } from "@/lib/db/rows";
 import { AppError } from "@/lib/errors";
+import { addDaysToDateString, combineDateTime, dateStringInZone } from "@/lib/util/dates";
 
 describe("AI agent with real tools", () => {
   let dbFile: string;
@@ -24,11 +25,12 @@ describe("AI agent with real tools", () => {
       endsAt: addDaysIso(3, 16),
       participantIds: [f.admin.id],
     });
+    const sofiaTomorrow = addDaysToDateString(dateStringInZone(new Date(), "Europe/Sofia"), 1);
     createEvent(f.adminActor, {
       calendarId: f.familyCalendarId,
       title: "Grandma visit",
-      startsAt: addDaysIso(1, 11),
-      endsAt: addDaysIso(1, 13),
+      startsAt: combineDateTime(sofiaTomorrow, "11:00", "Europe/Sofia").toISOString(),
+      endsAt: combineDateTime(sofiaTomorrow, "13:00", "Europe/Sofia").toISOString(),
       participantIds: [f.child.id],
     });
     const trip = createTrip(f.adminActor, { title: "Long weekend", destination: "Vitosha" });

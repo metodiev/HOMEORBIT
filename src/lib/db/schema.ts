@@ -494,4 +494,169 @@ CREATE TABLE rate_limits (
     name: "member_dashboard_preferences",
     sql: `ALTER TABLE members ADD COLUMN dashboard_prefs_json TEXT NOT NULL DEFAULT '{}';`,
   },
+  {
+    id: 5,
+    name: "personal_ai_media_and_movies",
+    sql: `
+ALTER TABLE members ADD COLUMN ai_provider TEXT NOT NULL DEFAULT 'auto';
+ALTER TABLE members ADD COLUMN ai_model TEXT;
+ALTER TABLE members ADD COLUMN persona TEXT;
+ALTER TABLE members ADD COLUMN interests_json TEXT NOT NULL DEFAULT '[]';
+ALTER TABLE members ADD COLUMN ai_preferences_json TEXT NOT NULL DEFAULT '{}';
+ALTER TABLE members ADD COLUMN share_family_knowledge INTEGER NOT NULL DEFAULT 0;
+ALTER TABLE members ADD COLUMN movie_preferences_json TEXT NOT NULL DEFAULT '{}';
+
+ALTER TABLE agent_messages ADD COLUMN provider TEXT;
+ALTER TABLE agent_messages ADD COLUMN model TEXT;
+ALTER TABLE agent_messages ADD COLUMN external_services_json TEXT NOT NULL DEFAULT '[]';
+ALTER TABLE tool_executions ADD COLUMN external_service INTEGER NOT NULL DEFAULT 0;
+
+CREATE TABLE member_memories (
+  id TEXT PRIMARY KEY,
+  household_id TEXT NOT NULL REFERENCES households(id) ON DELETE CASCADE,
+  member_id TEXT NOT NULL REFERENCES members(id) ON DELETE CASCADE,
+  scope TEXT NOT NULL DEFAULT 'private' CHECK (scope IN ('private','family')),
+  category TEXT NOT NULL DEFAULT 'general',
+  content TEXT NOT NULL,
+  tags_json TEXT NOT NULL DEFAULT '[]',
+  source TEXT NOT NULL DEFAULT 'explicit',
+  created_at TEXT NOT NULL,
+  updated_at TEXT NOT NULL
+);
+CREATE INDEX idx_memories_member ON member_memories(member_id, scope);
+CREATE INDEX idx_memories_household ON member_memories(household_id, scope);
+
+CREATE TABLE media_assets (
+  id TEXT PRIMARY KEY,
+  household_id TEXT NOT NULL REFERENCES households(id) ON DELETE CASCADE,
+  owner_member_id TEXT NOT NULL REFERENCES members(id) ON DELETE CASCADE,
+  kind TEXT NOT NULL CHECK (kind IN ('upload','generated','edited')),
+  library TEXT NOT NULL DEFAULT 'studio' CHECK (library IN ('studio','photos')),
+  source_asset_id TEXT REFERENCES media_assets(id) ON DELETE SET NULL,
+  storage_path TEXT NOT NULL UNIQUE,
+  original_filename TEXT,
+  mime_type TEXT NOT NULL,
+  bytes INTEGER NOT NULL,
+  width INTEGER,
+  height INTEGER,
+  checksum TEXT,
+  tags_json TEXT NOT NULL DEFAULT '[]',
+  description TEXT,
+  caption TEXT,
+  favorite INTEGER NOT NULL DEFAULT 0,
+  metadata_json TEXT NOT NULL DEFAULT '{}',
+  taken_at TEXT,
+  created_at TEXT NOT NULL,
+  deleted_at TEXT
+);
+CREATE INDEX idx_media_owner ON media_assets(owner_member_id, library, created_at);
+CREATE INDEX idx_media_household ON media_assets(household_id, library, created_at);
+
+CREATE TABLE albums (
+  id TEXT PRIMARY KEY,
+  household_id TEXT NOT NULL REFERENCES households(id) ON DELETE CASCADE,
+  owner_member_id TEXT NOT NULL REFERENCES members(id) ON DELETE CASCADE,
+  name TEXT NOT NULL,
+  visibility TEXT NOT NULL DEFAULT 'private' CHECK (visibility IN ('private','family','selected')),
+  created_at TEXT NOT NULL,
+  deleted_at TEXT
+);
+CREATE INDEX idx_albums_household ON albums(household_id, created_at);
+
+CREATE TABLE album_assets (
+  album_id TEXT NOT NULL REFERENCES albums(id) ON DELETE CASCADE,
+  asset_id TEXT NOT NULL REFERENCES media_assets(id) ON DELETE CASCADE,
+  added_at TEXT NOT NULL,
+  PRIMARY KEY (album_id, asset_id)
+);
+
+CREATE TABLE album_shares (
+  album_id TEXT NOT NULL REFERENCES albums(id) ON DELETE CASCADE,
+  member_id TEXT NOT NULL REFERENCES members(id) ON DELETE CASCADE,
+  PRIMARY KEY (album_id, member_id)
+);
+
+CREATE TABLE asset_shares (
+  asset_id TEXT NOT NULL REFERENCES media_assets(id) ON DELETE CASCADE,
+  member_id TEXT NOT NULL REFERENCES members(id) ON DELETE CASCADE,
+  created_at TEXT NOT NULL,
+  PRIMARY KEY (asset_id, member_id)
+);
+
+CREATE TABLE image_workflows (
+  id TEXT PRIMARY KEY,
+  household_id TEXT NOT NULL REFERENCES households(id) ON DELETE CASCADE,
+  name TEXT NOT NULL,
+  provider TEXT NOT NULL DEFAULT 'comfyui' CHECK (provider IN ('comfyui')),
+  operation TEXT NOT NULL CHECK (operation IN ('text_to_image','image_to_image','inpaint','background_replace','remove_object','restore','upscale')),
+  workflow_json TEXT NOT NULL,
+  model_label TEXT,
+  description TEXT,
+  enabled INTEGER NOT NULL DEFAULT 1,
+  created_by TEXT NOT NULL REFERENCES members(id),
+  created_at TEXT NOT NULL,
+  updated_at TEXT NOT NULL
+);
+CREATE INDEX idx_workflows_household ON image_workflows(household_id, operation, enabled);
+
+CREATE TABLE image_jobs (
+  id TEXT PRIMARY KEY,
+  household_id TEXT NOT NULL REFERENCES households(id) ON DELETE CASCADE,
+  member_id TEXT NOT NULL REFERENCES members(id) ON DELETE CASCADE,
+  provider TEXT NOT NULL DEFAULT 'comfyui',
+  workflow_id TEXT REFERENCES image_workflows(id) ON DELETE SET NULL,
+  operation TEXT NOT NULL,
+  prompt TEXT NOT NULL,
+  negative_prompt TEXT,
+  status TEXT NOT NULL DEFAULT 'queued' CHECK (status IN ('queued','running','succeeded','failed','cancelled')),
+  progress INTEGER NOT NULL DEFAULT 0,
+  error TEXT,
+  source_asset_id TEXT REFERENCES media_assets(id) ON DELETE SET NULL,
+  result_asset_id TEXT REFERENCES media_assets(id) ON DELETE SET NULL,
+  params_json TEXT NOT NULL DEFAULT '{}',
+  external_job_id TEXT,
+  queue_position INTEGER,
+  created_at TEXT NOT NULL,
+  started_at TEXT,
+  finished_at TEXT
+);
+CREATE INDEX idx_image_jobs_queue ON image_jobs(status, created_at);
+CREATE INDEX idx_image_jobs_member ON image_jobs(member_id, created_at);
+
+CREATE TABLE asset_embeddings (
+  asset_id TEXT PRIMARY KEY REFERENCES media_assets(id) ON DELETE CASCADE,
+  model TEXT NOT NULL,
+  vector_json TEXT NOT NULL,
+  created_at TEXT NOT NULL
+);
+
+CREATE TABLE movie_entries (
+  id TEXT PRIMARY KEY,
+  household_id TEXT NOT NULL REFERENCES households(id) ON DELETE CASCADE,
+  member_id TEXT NOT NULL REFERENCES members(id) ON DELETE CASCADE,
+  tmdb_id INTEGER,
+  title TEXT NOT NULL,
+  year INTEGER,
+  poster_url TEXT,
+  overview TEXT,
+  genres_json TEXT NOT NULL DEFAULT '[]',
+  language TEXT,
+  status TEXT NOT NULL DEFAULT 'watchlist' CHECK (status IN ('watchlist','watched')),
+  favorite INTEGER NOT NULL DEFAULT 0,
+  rating INTEGER,
+  notes TEXT,
+  source TEXT NOT NULL DEFAULT 'manual' CHECK (source IN ('tmdb','manual')),
+  created_at TEXT NOT NULL,
+  updated_at TEXT NOT NULL
+);
+CREATE UNIQUE INDEX idx_movie_member_tmdb ON movie_entries(member_id, tmdb_id) WHERE tmdb_id IS NOT NULL;
+CREATE INDEX idx_movie_member ON movie_entries(member_id, status, created_at);
+
+CREATE TABLE movie_cache (
+  tmdb_id INTEGER PRIMARY KEY,
+  payload_json TEXT NOT NULL,
+  fetched_at TEXT NOT NULL
+);
+`,
+  },
 ];

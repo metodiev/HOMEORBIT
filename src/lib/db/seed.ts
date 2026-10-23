@@ -1,6 +1,7 @@
 import { all, get, getDb, run } from "./index";
 import { newId, nowIso, toJson } from "@/lib/util/ids";
 import { hashPassword } from "@/lib/auth/password";
+import { SAMPLE_WORKFLOWS } from "@/lib/images/samples";
 import {
   addDaysToDateString,
   combineDateTime,
@@ -564,6 +565,95 @@ export function seedDemoData(): { seeded: boolean; householdId: string; summary:
       );
     }
 
+    const aiProfiles = [
+      {
+        id: ivan,
+        persona: "Warm, practical family organiser. Prefer concise answers, Bulgarian or English, and concrete next steps.",
+        interests: ["Cycling", "Bulgarian history", "Home automation", "Cooking"],
+        preferences: { tone: "warm", detail: "balanced", humor: "dry", language: "auto" },
+        share: 1,
+        movies: { genres: [35, 18], avoidGenres: [27], languages: ["bg", "en"], favoriteServices: [] },
+      },
+      {
+        id: maria,
+        persona: "Thoughtful planner who likes gentle, detailed suggestions for family activities and reading.",
+        interests: ["Gardening", "Film photography", "Contemporary fiction", "Weekend walks"],
+        preferences: { tone: "warm", detail: "thorough", humor: "light", language: "auto" },
+        share: 1,
+        movies: { genres: [18, 10749], avoidGenres: [28], languages: ["bg", "en"], favoriteServices: [] },
+      },
+      {
+        id: alex,
+        persona: "Helpful study and hobby assistant. Keep answers focused and explain technical things clearly.",
+        interests: ["Basketball", "Gaming", "Mathematics", "Science fiction"],
+        preferences: { tone: "concise", detail: "balanced", humor: "light", language: "auto" },
+        share: 0,
+        movies: { genres: [878, 28], avoidGenres: [], languages: ["en", "bg"], favoriteServices: [] },
+      },
+    ];
+    for (const profile of aiProfiles) {
+      run(
+        `UPDATE members SET persona = ?, interests_json = ?, ai_preferences_json = ?, share_family_knowledge = ?,
+         movie_preferences_json = ?, updated_at = ? WHERE id = ?`,
+        [
+          profile.persona,
+          JSON.stringify(profile.interests),
+          JSON.stringify(profile.preferences),
+          profile.share,
+          JSON.stringify(profile.movies),
+          now,
+          profile.id,
+        ],
+      );
+    }
+
+    const memories = [
+      { member: ivan, scope: "private", category: "preferences", content: "I prefer practical suggestions I can act on today, and I dislike overly long answers.", tags: ["style"] },
+      { member: ivan, scope: "private", category: "hobbies", content: "I enjoy weekend cycling routes around Vitosha and often plan them on Saturday mornings.", tags: ["cycling", "weekend"] },
+      { member: ivan, scope: "family", category: "household", content: "The family usually has dinner together at 19:00 on weekdays; Thursday is the busiest evening.", tags: ["routine"] },
+      { member: maria, scope: "private", category: "preferences", content: "I like detailed film recommendations with a short reason and where the film is available.", tags: ["movies"] },
+      { member: maria, scope: "private", category: "hobbies", content: "I am learning film photography and prefer local shops for developing negatives.", tags: ["photography"] },
+      { member: maria, scope: "family", category: "family", content: "Family movie night is usually Friday, and we prefer films that the children can watch too.", tags: ["movies", "routine"] },
+      { member: alex, scope: "private", category: "study", content: "I am preparing for a maths exam and prefer short explanations followed by practice questions.", tags: ["school"] },
+    ];
+    for (const memory of memories) {
+      run(
+        `INSERT INTO member_memories (id, household_id, member_id, scope, category, content, tags_json, source, created_at, updated_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?, 'explicit', ?, ?)`,
+        [
+          newId("mem"),
+          householdId,
+          memory.member,
+          memory.scope,
+          memory.category,
+          memory.content,
+          JSON.stringify(memory.tags),
+          now,
+          now,
+        ],
+      );
+    }
+
+    for (const sample of SAMPLE_WORKFLOWS) {
+      run(
+        `INSERT INTO image_workflows (id, household_id, name, provider, operation, workflow_json, model_label, description,
+          enabled, created_by, created_at, updated_at)
+         VALUES (?, ?, ?, 'comfyui', ?, ?, ?, ?, 0, ?, ?, ?)`,
+        [
+          newId("wfl"),
+          householdId,
+          sample.name,
+          sample.operation,
+          JSON.stringify(sample.workflow),
+          sample.modelLabel,
+          `${sample.description} Disabled until the model files are installed and COMFYUI_CHECKPOINT is configured.`,
+          ivan,
+          now,
+          now,
+        ],
+      );
+    }
+
     recordSeedAudit(householdId, ivan);
   })();
 
@@ -571,7 +661,7 @@ export function seedDemoData(): { seeded: boolean; householdId: string; summary:
     seeded: true,
     householdId,
     summary:
-      "Seeded Orbit Family with 8 members (6 household + 2 invited relatives), calendars, events (including a deliberate clash), school runs, tasks, shopping, packages, notes, meals and a holiday plan with unanswered invitations.",
+      "Seeded Orbit Family with 8 members (6 household + 2 invited relatives), calendars, events (including a deliberate clash), school runs, tasks, shopping, packages, notes, meals, a holiday plan with unanswered invitations, AI profiles, private/shared memories and disabled ComfyUI sample workflows.",
   };
 }
 

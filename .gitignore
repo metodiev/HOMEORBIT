@@ -5,6 +5,8 @@ data/*.db
 data/*.db-journal
 data/*.db-wal
 data/*.db-shm
+data/media/
+data/backups/
 .env
 .env.local
 .env*.local

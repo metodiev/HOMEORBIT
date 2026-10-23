@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { getCurrentActor } from "@/lib/auth/session";
 import { runAgent } from "@/lib/agent/runner";
 import { AppError } from "@/lib/errors";
+import { checkRateLimit } from "@/lib/auth/rate-limit";
 
 export const dynamic = "force-dynamic";
 
@@ -19,6 +20,7 @@ export async function POST(request: Request) {
   const message = typeof body.message === "string" ? body.message : "";
   const conversationId = typeof body.conversationId === "string" ? body.conversationId : null;
   try {
+    checkRateLimit(`agent-chat:${actor.id}`, 40, 60);
     const result = await runAgent(actor, { message, conversationId });
     return NextResponse.json(result);
   } catch (error) {

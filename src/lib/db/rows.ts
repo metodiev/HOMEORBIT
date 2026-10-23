@@ -23,6 +23,13 @@ export type MemberRow = {
   permission_overrides_json: string;
   notification_prefs_json: string;
   dashboard_prefs_json: string;
+  ai_provider: string;
+  ai_model: string | null;
+  persona: string | null;
+  interests_json: string;
+  ai_preferences_json: string;
+  share_family_knowledge: number;
+  movie_preferences_json: string;
   deactivated_at: string | null;
   created_at: string;
   updated_at: string;
@@ -373,4 +380,115 @@ export type IntegrationRow = {
   last_sync_at: string | null;
   last_error: string | null;
   created_at: string;
+};
+
+export type MemoryRow = {
+  id: string;
+  household_id: string;
+  member_id: string;
+  scope: "private" | "family";
+  category: string;
+  content: string;
+  tags_json: string;
+  source: string;
+  created_at: string;
+  updated_at: string;
+};
+
+export type MediaAssetRow = {
+  id: string;
+  household_id: string;
+  owner_member_id: string;
+  kind: "upload" | "generated" | "edited";
+  library: "studio" | "photos";
+  source_asset_id: string | null;
+  storage_path: string;
+  original_filename: string | null;
+  mime_type: string;
+  bytes: number;
+  width: number | null;
+  height: number | null;
+  checksum: string | null;
+  tags_json: string;
+  description: string | null;
+  caption: string | null;
+  favorite: number;
+  metadata_json: string;
+  taken_at: string | null;
+  created_at: string;
+  deleted_at: string | null;
+};
+
+export type AlbumRow = {
+  id: string;
+  household_id: string;
+  owner_member_id: string;
+  name: string;
+  visibility: "private" | "family" | "selected";
+  created_at: string;
+  deleted_at: string | null;
+};
+
+export type ImageWorkflowRow = {
+  id: string;
+  household_id: string;
+  name: string;
+  provider: "comfyui";
+  operation:
+    | "text_to_image"
+    | "image_to_image"
+    | "inpaint"
+    | "background_replace"
+    | "remove_object"
+    | "restore"
+    | "upscale";
+  workflow_json: string;
+  model_label: string | null;
+  description: string | null;
+  enabled: number;
+  created_by: string;
+  created_at: string;
+  updated_at: string;
+};
+
+export type ImageJobRow = {
+  id: string;
+  household_id: string;
+  member_id: string;
+  provider: string;
+  workflow_id: string | null;
+  operation: string;
+  prompt: string;
+  negative_prompt: string | null;
+  status: "queued" | "running" | "succeeded" | "failed" | "cancelled";
+  progress: number;
+  error: string | null;
+  source_asset_id: string | null;
+  result_asset_id: string | null;
+  params_json: string;
+  external_job_id: string | null;
+  queue_position: number | null;
+  created_at: string;
+  started_at: string | null;
+  finished_at: string | null;
+};
+
+export type MovieEntryRow = {
+  id: string;
+  household_id: string;
+  member_id: string;
+  tmdb_id: number | null;
+  title: string;
+  year: number | null;
+  poster_url: string | null;
+  overview: string | null;
+  genres_json: string;
+  language: string | null;
+  status: "watchlist" | "watched";
+  favorite: number;
+  rating: number | null;
+  notes: string | null;
+  source: "tmdb" | "manual";
+  created_at: string;
+  updated_at: string;
 };
