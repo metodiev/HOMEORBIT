@@ -20,7 +20,13 @@
     "mobile:copy": "cap copy",
     "mobile:android": "cap open android",
     "mobile:ios": "cap open ios",
-    "mobile:assets": "capacitor-assets generate --android --ios --iconBackgroundColor \"#0b4f49\" --iconBackgroundColorDark \"#0b4f49\" --splashBackgroundColor \"#0b4f49\" --splashBackgroundColorDark \"#0b4f49\" --logoSplashScale 0.22"
+    "mobile:assets": "capacitor-assets generate --android --ios --iconBackgroundColor \"#0b4f49\" --iconBackgroundColorDark \"#0b4f49\" --splashBackgroundColor \"#0b4f49\" --splashBackgroundColorDark \"#0b4f49\" --logoSplashScale 0.22",
+    "system:start": "node scripts/start-web.mjs",
+    "system:stop": "node scripts/stop-web.mjs",
+    "android:start": "node scripts/start-android.mjs",
+    "android:stop": "node scripts/stop-android.mjs",
+    "ios:start": "node scripts/start-ios.mjs",
+    "ios:stop": "node scripts/stop-ios.mjs"
   },
   "dependencies": {
     "@capacitor/android": "^8.5.3",

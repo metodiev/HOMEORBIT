@@ -52,6 +52,90 @@ persistent volume and back it up together with the database.
 
 ---
 
+## Start, stop and lifecycle scripts
+
+The operational scripts live in [`scripts/`](./scripts). They are cross-platform Node.js entry
+points with npm aliases, so they work from PowerShell, macOS Terminal and Linux shells.
+
+| Command | What it does |
+| --- | --- |
+| `npm run system:start` | Builds if `.next/BUILD_ID` is missing, starts the production Next.js server in the background, writes a PID/state file and waits for `/api/health`. |
+| `npm run system:stop` | Stops the tracked Next.js process tree and removes the state file. |
+| `npm run android:start` | Finds the Android SDK, selects or starts an emulator, syncs Capacitor, builds the debug APK, installs it and launches HomeOrbit. |
+| `npm run android:stop` | Stops the Android app and shuts down the emulator (a physical device is left connected). |
+| `npm run ios:start` | macOS only: boots an iOS Simulator, syncs Capacitor, builds the simulator app, installs it and launches HomeOrbit. |
+| `npm run ios:stop` | macOS only: terminates the HomeOrbit app and shuts down the selected iOS Simulator. |
+
+```mermaid
+flowchart LR
+  Dev["Developer / operator shell"] --> StartWeb["npm run system:start"]
+  StartWeb --> Web["Next.js server<br/>:3000"]
+  Web --> State[".runtime/web.json<br/>.runtime/web.log"]
+  StopWeb["npm run system:stop"] --> Web
+  StopWeb --> State
+  Dev --> StartAndroid["npm run android:start"]
+  StartAndroid --> Android["AVD or connected device"]
+  Android --> AndroidApp["HomeOrbit APK"]
+  StopAndroid["npm run android:stop"] --> AndroidApp
+  StopAndroid --> Android
+  Dev --> StartIos["npm run ios:start<br/>(macOS)"]
+  StartIos --> IOS["iOS Simulator"]
+  IOS --> IOSApp["HomeOrbit simulator app"]
+  StopIos["npm run ios:stop<br/>(macOS)"] --> IOSApp
+  StopIos --> IOS
+```
+
+Examples:
+
+```bash
+# Production web server; --build forces a fresh production build
+npm run system:start
+npm run system:start -- --build
+npm run system:start -- --dev --port 3010
+npm run system:stop
+
+# Android: use the first available AVD/device, or choose one explicitly
+npm run android:start
+npm run android:start -- --avd Pixel_9 --headless
+npm run android:start -- --skip-build
+npm run android:stop
+
+# iOS on a Mac with Xcode
+npm run ios:start
+npm run ios:start -- --simulator "iPhone 16 Pro"
+npm run ios:start -- --skip-build
+npm run ios:stop
+```
+
+| Environment variable | Equivalent option | Purpose |
+| --- | --- | --- |
+| `HOMEORBIT_BUILD=1` | `--build` | Force a production web build |
+| `HOMEORBIT_DEV=1` | `--dev` | Run Next.js development mode in the background |
+| `HOMEORBIT_PORT`, `HOMEORBIT_HOST` | `--port`, `--host` | Web listener |
+| `HOMEORBIT_SKIP_BUILD=1` | `--skip-build` | Reuse an existing APK/simulator app |
+| `HOMEORBIT_ANDROID_HEADLESS=1` | `--headless` | Start the emulator without a window |
+| `HOMEORBIT_ANDROID_AVD`, `HOMEORBIT_ANDROID_SERIAL` | `--avd`, `--serial` | Select the Android target |
+| `HOMEORBIT_IOS_SIMULATOR` | `--simulator`, `--udid` | Select the iOS Simulator by name or UDID |
+
+Environment variables are the most portable option in PowerShell, where the `npm.ps1` wrapper may
+consume arguments after `--`. For command-line flags on Windows use `npm.cmd run ... -- --skip-build`.
+On macOS/Linux `npm run ... -- --skip-build` works normally. The `--headless` Android mode adds
+`-no-window -gpu swiftshader_indirect` for CI/remote machines.
+
+Runtime state is kept under `.runtime/` and is gitignored:
+
+- `.runtime/web.json` — tracked web PID, port, mode and start time.
+- `.runtime/web.log` — web server stdout/stderr.
+- `.runtime/android.json`, `.runtime/ios.json` — last launched device/simulator.
+- `.runtime/android-emulator.log` — emulator startup diagnostics.
+
+`system:start` does **not** create or seed a database. Run `npm run db:seed` once for the demo
+household, or use the normal registration flow for a fresh private household. It also does not start
+Ollama or ComfyUI; those remain independently managed model services (see below). For a plain HTTP
+LAN trial set `SESSION_COOKIE_SECURE=false`; keep it `true` for HTTPS.
+
+---
+
 ## What is implemented
 
 ### Personal AI profiles and memories
@@ -176,6 +260,344 @@ persistent volume and back it up together with the database.
 
 ## Architecture
 
+HomeOrbit is a modular monolith: one authenticated Next.js process owns the UI, server actions,
+route handlers, authorization and domain logic; SQLite, media files, model servers and optional
+external providers sit behind that server boundary. The mobile apps are thin Capacitor shells around
+the same web application, not a second implementation.
+
+The diagrams below render on GitHub and GitLab. For local viewing in VS Code, use a Mermaid-capable
+Markdown preview extension.
+
+### System context
+
+```mermaid
+flowchart LR
+  subgraph Devices["Family devices"]
+    Browser["Desktop / laptop<br/>browser"]
+    Android["Android app<br/>Capacitor WebView"]
+    IOS["iPhone / iPad app<br/>Capacitor WebView"]
+  end
+
+  Gateway["Private access layer<br/>Tailscale Serve / WireGuard / Caddy"]
+
+  subgraph Mac["Mac Studio - trusted host"]
+    Web["Next.js 15 + React 19<br/>UI, server actions, APIs"]
+    DB[("SQLite<br/>data/homeorbit.db")]
+    Media[("Media store<br/>data/media")]
+    Queue["Serial image job queue"]
+    Ollama["Ollama<br/>127.0.0.1:11434"]
+    Comfy["ComfyUI<br/>127.0.0.1:8188"]
+  end
+
+  TMDB["TMDB / JustWatch"]
+  Search["SearXNG / Brave Search"]
+  External["Optional external<br/>OpenAI-compatible AI"]
+
+  Browser -->|HTTPS| Gateway
+  Android -->|HTTPS| Gateway
+  IOS -->|HTTPS| Gateway
+  Gateway -->|only the private web route| Web
+  Web <--> DB
+  Web <--> Media
+  Web --> Queue --> Comfy
+  Web --> Ollama
+  Web -. authorized search requests .-> Search
+  Web -. authorized movie requests .-> TMDB
+  Web -. only when configured .-> External
+```
+
+**Trust rule:** browsers and phones never connect to Ollama, ComfyUI, SQLite or an API credential
+directly. They authenticate to the Next.js origin and receive only rendered data, model status and
+short-lived media responses.
+
+### Runtime deployment and ports
+
+```mermaid
+flowchart TB
+  Internet["Internet / family VPN"] -->|no direct model ports| Closed["11434, 8188, 8080 and SQLite<br/>remain private"]
+  Phone["Phone / tablet / computer"] -->|HTTPS| Edge["Tailscale Serve, WireGuard or Caddy"]
+  Edge -->|127.0.0.1:3000| Next["HomeOrbit Next.js process"]
+  Next --> SQLite[("SQLite WAL")]
+  Next --> Files[("Media storage")]
+  Next --> Ollama["Ollama :11434"]
+  Next --> ComfyUI["ComfyUI :8188"]
+  Next --> WebSearch["SearXNG :8080 / Brave"]
+  Next --> TMDB["TMDB API"]
+  Next -. optional .-> ExternalAI["External AI provider"]
+```
+
+| Port | Process | Intended exposure |
+| --- | --- | --- |
+| `3000` | HomeOrbit Next.js | Localhost or private HTTPS reverse proxy only |
+| `11434` | Ollama | Localhost or private LAN only; never router-forwarded |
+| `8188` | ComfyUI | Localhost/private LAN only; never public |
+| `8080` | SearXNG | Localhost/private LAN only; JSON API used server-side |
+| SQLite | Database | No network port; file access under the app account only |
+| `443` | Caddy/Tailscale Serve | Authenticated private HTTPS gateway |
+
+### Application layers
+
+```mermaid
+flowchart TB
+  UI["React 19 UI<br/>pages, forms, chat, galleries"] --> Boundary["Server trust boundary"]
+  Boundary --> Actions["Server actions<br/>src/lib/actions.ts"]
+  Boundary --> Routes["Route handlers<br/>src/app/api/**"]
+  Actions --> Auth["Sessions, Actor, capabilities<br/>src/lib/auth"]
+  Routes --> Auth
+  Auth --> Domain["Domain services<br/>src/lib/domain"]
+  Domain --> DB[("SQLite<br/>better-sqlite3")]
+  Domain --> MediaLayer["Media validation, paths, quotas<br/>src/lib/media"]
+  Domain --> AI["Provider-independent AI<br/>src/lib/agent + src/lib/ai"]
+  Domain --> ImageLayer["ComfyUI client + serial queue<br/>src/lib/images"]
+  Domain --> MovieLayer["TMDB detail cache<br/>src/lib/movies"]
+  MediaLayer --> Files[("data/media")]
+  AI --> Ollama["Ollama"]
+  AI --> External["Optional external AI"]
+  AI --> Search["SearXNG / Brave"]
+  ImageLayer --> Comfy["ComfyUI"]
+  MovieLayer --> TMDB["TMDB / JustWatch"]
+```
+
+| Area | Main code | Responsibility |
+| --- | --- | --- |
+| Product pages | `src/app/(app)/**/page.tsx` | Server-rendered pages for calendar, tasks, assistant, studio, photos, movies, settings and family administration |
+| Server boundary | `src/lib/actions.ts`, `src/app/api/**/route.ts` | Form mutations, chat, media streaming, job status, exports and health checks |
+| Identity | `src/lib/auth/**` | scrypt passwords, sessions, cookies, capabilities, resource access and rate limits |
+| Domain | `src/lib/domain/**` | Business rules, ownership checks and all SQL that exposes family data |
+| Persistence | `src/lib/db/**` | Append-only migrations, typed row helpers, SQLite connection and seed data |
+| AI | `src/lib/agent/**`, `src/lib/ai/**` | Provider selection, prompt context, tool schemas, local fallback, Ollama and protected web research |
+| Images | `src/lib/images/**`, `src/lib/media/**` | ComfyUI workflows, serialized jobs, validation, quotas, storage paths and derived assets |
+| Movies | `src/lib/movies/**` | TMDB requests, detail cache and verified availability semantics |
+| Native shell | `mobile/www`, `android`, `ios` | Server-URL setup, QR pairing, offline recovery and native bridge behaviours |
+| Operations | `scripts/**` | Migrations, seed/reset, proactive checks, backup, purge and lifecycle wrappers |
+
+### Request and authorization lifecycle
+
+Every mutation and query enters through a server boundary. Client components never receive a
+database handle or a capability bypass.
+
+```mermaid
+sequenceDiagram
+  participant C as Browser / mobile WebView
+  participant N as Next.js route or action
+  participant A as Auth and session store
+  participant D as Domain service
+  participant DB as SQLite
+
+  C->>N: Request + HttpOnly SameSite session cookie
+  N->>A: Resolve hashed session token
+  A->>DB: Load session and member
+  A-->>N: Actor: member, household, role, capabilities
+  N->>D: Call domain function with actor
+  D->>DB: Household-scoped query plus ownership/share checks
+  alt Authorized
+    DB-->>D: Rows visible to this actor
+    D-->>N: Typed result
+    N-->>C: Rendered page or JSON
+  else Missing or not visible
+    D-->>N: Forbidden / NotFound
+    N-->>C: Safe error without leaking another household
+  end
+```
+
+Consequential assistant actions do not execute directly. The tool runner creates an
+`approval_requests` row; a guardian approves it, then the action executes **as the requester** so
+ownership and visibility rules stay intact.
+
+### AI request, tools and provider fallback
+
+```mermaid
+sequenceDiagram
+  participant U as Member
+  participant API as POST /api/agent/chat
+  participant Auth as Auth + rate limit
+  participant P as Provider resolver
+  participant O as Ollama
+  participant E as External AI
+  participant T as Tool runner
+  participant D as Domain services
+  participant DB as SQLite
+
+  U->>API: Message + conversation id
+  API->>Auth: Require actor and enforce chat rate limit
+  API->>DB: Load only this member's conversation
+  API->>P: Resolve member profile, model and provider
+  alt Ollama configured and healthy
+    P->>O: /v1/chat/completions with focused tools
+    O-->>P: Assistant text + tool calls
+  else External provider configured
+    P->>E: OpenAI-compatible request
+    Note over P,E: Response is marked external in UI and logs
+    E-->>P: Assistant text + tool calls
+  else Local unavailable or malformed
+    P-->>API: Deterministic built-in fallback
+  end
+  API->>T: Validate tool calls and execute as actor
+  T->>D: Authorized domain operation or approval request
+  D->>DB: Read/write within actor scope
+  T-->>API: Real result, approval id or error
+  API->>DB: Save message, tool executions, provider metadata
+  API-->>U: Answer + provider badge + external-service labels + tool receipts
+```
+
+Key implementation rules:
+
+- Local model output is never trusted for dates, IDs or success claims; relative dates are repaired
+  and tool results are rendered as returned.
+- External AI/search use is visible in the reply metadata. Credentials stay in server environment
+  variables.
+- Web-fetch tools enforce public-host validation, redirect revalidation, size/time limits and
+  unmarked-content treatment.
+
+### Image Studio and ComfyUI pipeline
+
+```mermaid
+sequenceDiagram
+  participant U as Member
+  participant API as /api/images/jobs
+  participant Q as Serial queue
+  participant DB as SQLite
+  participant C as ComfyUI
+  participant M as Media storage
+
+  U->>API: Operation, prompt, source image / mask
+  API->>API: Validate actor, upload, quota and rate limit
+  API->>DB: Insert queued job owned by member
+  API->>Q: Enqueue
+  Q->>DB: Claim next job (one at a time)
+  Q->>C: Upload source/mask and POST API workflow
+  C-->>Q: prompt_id
+  loop Poll /history/{prompt_id}
+    Q->>C: Read queue/history state
+    C-->>Q: Progress, error or output image
+  end
+  Q->>M: Store generated or edited asset separately
+  Q->>DB: Link result asset, metadata, provider job id, status
+  U->>API: Poll job
+  API-->>U: Real status, progress, result URL or failure
+```
+
+The queue is intentionally process-local and serialized; it prevents two family members from
+exhausting the GPU at once. Do not run multiple Next.js instances against this SQLite schema without
+replacing the queue/rate-limit implementation.
+
+### Native mobile shell
+
+```mermaid
+flowchart TD
+  Launch["Launch Android / iOS app"] --> Saved{"Saved server URL?"}
+  Saved -- No --> Setup["Native setup shell"]
+  Setup --> QR["Manual URL or QR photo"]
+  QR --> Validate["Validate root http(s) URL"]
+  Validate --> Save["Save URL<br/>SharedPreferences / UserDefaults"]
+  Save --> Reload["Recreate Capacitor bridge"]
+  Saved -- Yes --> Bridge["Capacitor bridge<br/>loads saved origin"]
+  Reload --> Bridge
+  Bridge --> Web["Authenticated HomeOrbit web app<br/>same pages and server actions"]
+  Web --> Native["Native bridge<br/>back, share/download, external links, network banner"]
+  Bridge -. server unreachable .-> Offline["Self-contained offline page"]
+  Offline -->|Retry| Bridge
+  Offline -->|homeorbit://setup| Clear["Clear saved URL only"] --> Setup
+```
+
+The phone never contains an Ollama or ComfyUI process. Native code contributes the server-URL
+setting, URL validation, safe download/share handling, back navigation and recovery page; all
+business logic remains server-side.
+
+### Data relationships
+
+The core household and everyday-data model:
+
+```mermaid
+erDiagram
+  HOUSEHOLDS ||--o{ MEMBERS : contains
+  HOUSEHOLDS ||--o{ INVITATIONS : issues
+  MEMBERS ||--o{ SESSIONS : authenticates
+  MEMBERS ||--o{ CALENDARS : owns
+  CALENDARS ||--o{ EVENTS : contains
+  EVENTS }o--o{ MEMBERS : participants
+  MEMBERS ||--o{ TASKS : creates
+  MEMBERS ||--o{ NOTES : writes
+  NOTES }o--o{ MEMBERS : shared_with
+  HOUSEHOLDS ||--o{ SHOPPING_LISTS : has
+  SHOPPING_LISTS ||--o{ SHOPPING_ITEMS : contains
+  HOUSEHOLDS ||--o{ PACKAGES : tracks
+  PACKAGES ||--o{ PACKAGE_UPDATES : has
+  HOUSEHOLDS ||--o{ PICKUPS : schedules
+  HOUSEHOLDS ||--o{ SCHOOL_DAYS : schedules
+  HOUSEHOLDS ||--o{ TRIPS : plans
+  TRIPS ||--o{ TRIP_RSVPS : has
+  HOUSEHOLDS ||--o{ MEAL_PLAN : plans
+  HOUSEHOLDS ||--o{ RECIPES : stores
+  HOUSEHOLDS ||--o{ REMINDERS : schedules
+  HOUSEHOLDS ||--o{ NOTIFICATIONS : emits
+  HOUSEHOLDS ||--o{ INVENTORY_ITEMS : inventories
+```
+
+The private AI, media and movie model:
+
+```mermaid
+erDiagram
+  MEMBERS ||--o{ AGENT_CONVERSATIONS : owns
+  AGENT_CONVERSATIONS ||--o{ AGENT_MESSAGES : contains
+  AGENT_MESSAGES ||--o{ TOOL_EXECUTIONS : invokes
+  MEMBERS ||--o{ MEMBER_MEMORIES : owns
+  MEMBERS ||--o{ APPROVAL_REQUESTS : requests
+  MEMBERS ||--o{ APPROVAL_REQUESTS : approves
+  MEMBERS ||--o{ MEDIA_ASSETS : owns
+  MEDIA_ASSETS ||--o{ MEDIA_ASSETS : derived_from
+  MEDIA_ASSETS }o--o{ ALBUMS : contains
+  ALBUMS }o--o{ MEMBERS : shared_with
+  MEDIA_ASSETS }o--o{ MEMBERS : shared_with
+  MEDIA_ASSETS ||--o| ASSET_EMBEDDINGS : embeds
+  MEMBERS ||--o{ IMAGE_WORKFLOWS : authors
+  IMAGE_WORKFLOWS ||--o{ IMAGE_JOBS : executes
+  MEDIA_ASSETS ||--o{ IMAGE_JOBS : source
+  IMAGE_JOBS ||--o| MEDIA_ASSETS : result
+  MEMBERS ||--o{ MOVIE_ENTRIES : lists
+  MOVIE_CACHE }o--o{ MOVIE_ENTRIES : enriches
+  HOUSEHOLDS ||--o{ AUDIT_LOG : records
+```
+
+Important invariants:
+
+- `members.household_id` is checked on every domain query; an ID from another household is treated
+  as not found.
+- Private assets and memories have an owner check before sharing checks.
+- Family albums and family memories require an explicit visibility/opt-in rule; guest relatives do
+  not inherit family media or family knowledge access.
+- A generated/edited asset keeps its source asset id and metadata so an original can be audited and
+  retained separately.
+
+### Backup, retention and monitoring
+
+```mermaid
+flowchart LR
+  DB["SQLite WAL"] --> CP["WAL checkpoint"]
+  CP --> Online["SQLite online backup"]
+  Media["data/media"] --> Copy["Copy media root"]
+  Online --> Snapshot["data/backups/[timestamp]"]
+  Copy --> Snapshot
+  Snapshot --> Manifest["manifest + restore instructions"]
+  Manifest --> External["Encrypted external disk / private NAS"]
+  Deleted["Soft-deleted media"] --> Purge["media:purge after retention"]
+```
+
+```mermaid
+flowchart TD
+  Health["GET /api/health"] --> Public["Public: status + time"]
+  Health --> Gate{"Admin session or HEALTH_CHECK_TOKEN?"}
+  Gate -- Yes --> Detail["DB, disk, queue, memory, Ollama, ComfyUI and integrations"]
+  Gate -- No --> Public
+  Detail --> Degraded["503 when database/storage is degraded"]
+```
+
+Model-server outages are reported without taking down calendar, media or family-data pages. Image
+jobs fail with the real ComfyUI error; assistant requests fall back to the deterministic engine when
+local model output is unavailable or malformed.
+
+### Project layout
+
 ```text
 src/
   app/
@@ -202,8 +624,21 @@ src/
     db/                    SQLite schema/migrations, rows, seed
     auth/                  sessions, capabilities, resource access, rate limits
   components/              UI, chat, image monitor, media cards, model selector
-scripts/                   migrate, seed, reset, proactive, backup, media purge
+mobile/www/                Capacitor setup shell and self-contained offline page
+android/                   Capacitor Android project
+ios/                       Capacitor iOS project
+assets/                    Native icon/splash source
+scripts/                   migrations, seed, backup, purge, proactive checks and lifecycle scripts
+  start-web.mjs            background production/dev web server
+  stop-web.mjs             stop the tracked web process tree
+  start-android.mjs        emulator/device selection, sync, build, install, launch
+  stop-android.mjs         app stop and emulator shutdown
+  start-ios.mjs            simulator build, install and launch (macOS)
+  stop-ios.mjs             simulator app stop and shutdown (macOS)
+  lib/                     shared process, Android SDK and iOS simulator helpers
 tests/                     Vitest domain/security/queue integration tests
+data/                      SQLite database, media and backups (gitignored)
+.runtime/                  PID/state and lifecycle logs (gitignored)
 ```
 
 ### Data model additions (migration 5)
@@ -481,13 +916,24 @@ phone continues to load the server.
 
 ### Android
 
-Open the project in Android Studio:
+The managed path starts or reuses an emulator/device, syncs Capacitor, builds the debug APK,
+installs it and launches the app:
+
+```bash
+npm run android:start
+npm run android:stop
+```
+
+Use `--skip-build` to reuse the existing APK, `--avd <name>` to choose an AVD, `--serial <id>` for a
+specific device, or `--headless` for a CI/remote machine.
+
+Open the project in Android Studio instead when you want the IDE:
 
 ```bash
 npm run mobile:android
 ```
 
-Or build a debug APK from the command line (with the Android SDK and JDK configured):
+Or build a debug APK manually (with the Android SDK and JDK configured):
 
 ```bash
 cd android
@@ -502,7 +948,19 @@ for trusted LAN testing; disable/remove that allowance before any broader distri
 
 ### iOS
 
-Open the Xcode project:
+On macOS, the managed path boots a simulator, syncs Capacitor, builds the Debug simulator app,
+installs it and launches it:
+
+```bash
+npm run ios:start
+npm run ios:start -- --simulator "iPhone 16 Pro"
+npm run ios:stop
+```
+
+Use `--skip-build` to reuse an existing simulator app. The script requires Xcode command-line tools
+and will stop with a clear error on Windows/Linux.
+
+Open the Xcode project when you want the IDE:
 
 ```bash
 npm run mobile:ios
@@ -544,6 +1002,10 @@ store distribution is required, add native-only features and complete a store re
 ## Running the platform on the Mac Studio
 
 ### Production process
+
+For local development or a quick private trial, `npm run system:start` builds when needed and runs
+the server in the background. It is a convenience wrapper, **not** a boot-time process manager; use
+launchd/pm2 (below) for a server that must survive reboots and crashes.
 
 1. Build once: `npm ci && npm run build`.
 2. Put secrets in the service environment (not in the repo).
@@ -657,8 +1119,11 @@ Manual cross-user checks worth repeating after changes:
 | `npm run proactive:run` | run proactive checks from cron |
 | `npm run media:purge` | permanently purge soft-deleted media after retention |
 | `npm run backup` | checkpoint and copy database + media |
+| `npm run system:start` / `system:stop` | background web server start/stop with health check |
+| `npm run android:start` / `android:stop` | emulator/device app start/stop |
+| `npm run ios:start` / `ios:stop` | simulator app start/stop (macOS) |
 | `npm run mobile:sync` | copy setup shell and plugins into Android/iOS |
-| `npm run mobile:android` / `mobile:ios` | open the native project |
+| `npm run mobile:android` / `mobile:ios` | open the native project in Android Studio/Xcode |
 | `npm run mobile:assets` | regenerate native icons/splash from `assets/icon.svg` |
 
 ---
