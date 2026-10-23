@@ -34,6 +34,7 @@ import {
 } from "@/lib/domain/movies";
 import { webSearch, fetchWebPage, htmlToText } from "@/lib/ai/web";
 import { addDaysToDateString, dateStringInZone } from "@/lib/util/dates";
+import { normalizeServerUrl } from "@/lib/mobile/native";
 
 const PNG = Buffer.from(
   "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII=",
@@ -638,6 +639,16 @@ describe("private family AI platform", () => {
       "SELECT external_service FROM tool_executions WHERE tool_name = 'web_search' ORDER BY created_at DESC LIMIT 1",
     );
     expect(row?.external_service).toBe(1);
+  });
+
+  it("validates native mobile server addresses without accepting paths or credentials", () => {
+    expect(normalizeServerUrl("https://homeorbit.example.ts.net/")).toBe("https://homeorbit.example.ts.net");
+    expect(normalizeServerUrl("homeorbit.example.ts.net")).toBe("https://homeorbit.example.ts.net");
+    expect(normalizeServerUrl("http://192.168.1.20:3000")).toBe("http://192.168.1.20:3000");
+    expect(() => normalizeServerUrl("not a url")).toThrow(/spaces/i);
+    expect(() => normalizeServerUrl("https://user:pass@example.com")).toThrow(/credentials/i);
+    expect(() => normalizeServerUrl("https://example.com/homeorbit")).toThrow(/root address/i);
+    expect(() => normalizeServerUrl("file:///etc/passwd")).toThrow(/http/i);
   });
 
   it("keeps the media table and queues usable after the extension migration", () => {

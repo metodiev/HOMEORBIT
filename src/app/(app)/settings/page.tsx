@@ -1,4 +1,5 @@
 import Link from "next/link";
+import { headers } from "next/headers";
 import { all, get } from "@/lib/db";
 import type { MemberRow } from "@/lib/db/rows";
 import { can } from "@/lib/auth/actor";
@@ -39,6 +40,8 @@ import { listWorkflows, sampleWorkflowList, WORKFLOW_OPERATIONS } from "@/lib/do
 import { comfyuiConfigured } from "@/lib/images/comfyui";
 import { imageQueueInfo } from "@/lib/images/queue";
 import { Badge, Card, FeedbackBanner, MemberAvatar, PageHeader } from "@/components/ui";
+import { MobileAppSettings } from "@/components/MobileAppSettings";
+import { MobilePairingCard } from "@/components/MobilePairingCard";
 
 export const metadata = { title: "Settings & family" };
 
@@ -94,6 +97,21 @@ export default async function SettingsPage({
   const workflows = canManageWorkflows ? listWorkflows(actor, { includeDisabled: true }) : [];
   const samples = sampleWorkflowList();
   const queue = imageQueueInfo(actor);
+  const requestHeaders = await headers();
+  const forwardedHost = requestHeaders.get("x-forwarded-host")?.split(",")[0]?.trim();
+  const requestHost = forwardedHost || requestHeaders.get("host") || "";
+  const forwardedProto = requestHeaders.get("x-forwarded-proto")?.split(",")[0]?.trim();
+  const hostIsLocal = !requestHost || /^(localhost|127\.|\[::1\])/i.test(requestHost);
+  let mobileServerUrl = process.env.MOBILE_PUBLIC_URL?.trim().replace(/\/+$/, "") ?? "";
+  if (mobileServerUrl) {
+    try {
+      mobileServerUrl = new URL(mobileServerUrl).origin;
+    } catch {
+      mobileServerUrl = "";
+    }
+  } else if (!hostIsLocal) {
+    mobileServerUrl = `${forwardedProto || "https"}://${requestHost}`;
+  }
   const audit = can(actor, "audit.read") ? listAuditLog(actor, 40) : [];
   const isAdmin = can(actor, "household.manage");
 
@@ -641,6 +659,10 @@ export default async function SettingsPage({
               were written in.
             </p>
           </Card>
+
+          <MobileAppSettings />
+
+          <MobilePairingCard serverUrl={mobileServerUrl} />
 
           <Card title="Data & privacy" subtitle="Export or delete your own account">
             <a href="/api/account/export" className="btn-secondary w-full text-xs">⬇ Export my data (JSON)</a>

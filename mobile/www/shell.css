@@ -1,0 +1,244 @@
+:root {
+  color-scheme: light;
+  --ink: #16201f;
+  --muted: #5c6b68;
+  --cream: #f6f2ea;
+  --paper: #fffdf8;
+  --teal: #0f766e;
+  --teal-deep: #0b4f49;
+  --sun: #e9b949;
+  --terracotta: #c2683f;
+  --danger: #b42318;
+  --line: rgba(15, 35, 32, 0.12);
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html,
+body {
+  min-height: 100%;
+}
+
+body {
+  margin: 0;
+  background:
+    radial-gradient(circle at 12% 0%, rgba(233, 185, 73, 0.22), transparent 38%),
+    radial-gradient(circle at 88% 100%, rgba(15, 118, 110, 0.16), transparent 42%),
+    var(--cream);
+  color: var(--ink);
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+  padding:
+    max(1.25rem, env(safe-area-inset-top))
+    max(1rem, env(safe-area-inset-right))
+    max(1.5rem, env(safe-area-inset-bottom))
+    max(1rem, env(safe-area-inset-left));
+}
+
+.shell {
+  width: min(32rem, 100%);
+  margin: 0 auto;
+  padding-top: clamp(1rem, 8vh, 4rem);
+}
+
+.brand {
+  display: flex;
+  align-items: center;
+  gap: 0.9rem;
+  margin-bottom: 1.5rem;
+}
+
+.brand img {
+  width: 4rem;
+  height: 4rem;
+  border-radius: 1rem;
+  box-shadow: 0 12px 30px rgba(11, 79, 73, 0.18);
+}
+
+.brand small {
+  display: block;
+  margin-top: 0.2rem;
+  color: var(--muted);
+  font-size: 0.75rem;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+}
+
+h1 {
+  margin: 0;
+  font-size: 1.55rem;
+  line-height: 1.2;
+}
+
+h2 {
+  margin: 0 0 0.5rem;
+  font-size: 1.05rem;
+}
+
+p {
+  color: var(--muted);
+  line-height: 1.55;
+}
+
+.card {
+  background: var(--paper);
+  border: 1px solid var(--line);
+  border-radius: 1.25rem;
+  padding: 1.15rem;
+  box-shadow: 0 18px 55px rgba(20, 45, 40, 0.1);
+}
+
+.card + .card {
+  margin-top: 0.9rem;
+}
+
+label {
+  display: block;
+  margin-bottom: 0.35rem;
+  font-size: 0.78rem;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+}
+
+input[type="url"],
+input[type="text"] {
+  width: 100%;
+  min-height: 3rem;
+  padding: 0.75rem 0.85rem;
+  border: 1px solid var(--line);
+  border-radius: 0.85rem;
+  background: #fff;
+  color: var(--ink);
+  font: inherit;
+}
+
+input:focus {
+  outline: 3px solid rgba(15, 118, 110, 0.22);
+  border-color: var(--teal);
+}
+
+.actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.55rem;
+  margin-top: 0.9rem;
+}
+
+button,
+.button {
+  min-height: 2.8rem;
+  padding: 0.7rem 1rem;
+  border: 0;
+  border-radius: 999px;
+  font: inherit;
+  font-weight: 700;
+  cursor: pointer;
+}
+
+button.primary {
+  flex: 1;
+  background: var(--teal);
+  color: #fff;
+  box-shadow: 0 8px 20px rgba(15, 118, 110, 0.24);
+}
+
+button.secondary,
+.button.secondary {
+  background: #ece6da;
+  color: var(--ink);
+}
+
+button.ghost {
+  background: transparent;
+  color: var(--teal-deep);
+  text-decoration: underline;
+}
+
+button:disabled {
+  opacity: 0.55;
+  cursor: wait;
+}
+
+.status {
+  min-height: 1.25rem;
+  margin-top: 0.75rem;
+  font-size: 0.82rem;
+  font-weight: 600;
+}
+
+.status.error {
+  color: var(--danger);
+}
+
+.status.ok {
+  color: var(--teal);
+}
+
+.hint {
+  margin-top: 0.9rem;
+  font-size: 0.8rem;
+}
+
+details {
+  margin-top: 0.8rem;
+  color: var(--muted);
+  font-size: 0.82rem;
+}
+
+summary {
+  cursor: pointer;
+  font-weight: 700;
+  color: var(--teal-deep);
+}
+
+code {
+  padding: 0.1rem 0.3rem;
+  border-radius: 0.35rem;
+  background: #eee8dc;
+  font-size: 0.85em;
+  overflow-wrap: anywhere;
+}
+
+.offline-banner {
+  display: flex;
+  gap: 0.7rem;
+  align-items: flex-start;
+  padding: 0.9rem;
+  border: 1px solid rgba(194, 104, 63, 0.3);
+  border-radius: 1rem;
+  background: #fff4e8;
+  margin-bottom: 1rem;
+}
+
+.offline-banner strong {
+  color: var(--terracotta);
+}
+
+.hidden {
+  display: none !important;
+}
+
+.footnote {
+  margin-top: 1.25rem;
+  text-align: center;
+  font-size: 0.72rem;
+  color: var(--muted);
+}
+
+.spinner {
+  display: inline-block;
+  width: 0.85rem;
+  height: 0.85rem;
+  border: 2px solid rgba(255, 255, 255, 0.45);
+  border-top-color: #fff;
+  border-radius: 999px;
+  animation: spin 0.7s linear infinite;
+  vertical-align: -0.12rem;
+}
+
+@keyframes spin {
+  to {
+    transform: rotate(360deg);
+  }
+}

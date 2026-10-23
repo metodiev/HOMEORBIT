@@ -1,0 +1,71 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+    <meta name="theme-color" content="#0b4f49" />
+    <meta name="format-detection" content="telephone=no" />
+    <title>Connect HomeOrbit</title>
+    <link rel="stylesheet" href="shell.css" />
+  </head>
+  <body data-page="setup">
+    <main class="shell">
+      <div class="brand">
+        <img src="icon.svg" alt="HomeOrbit" />
+        <div>
+          <h1>HomeOrbit</h1>
+          <small id="platform-label">Mobile setup</small>
+        </div>
+      </div>
+
+      <div class="card">
+        <h2>Connect to your family server</h2>
+        <p>
+          HomeOrbit runs on your Mac Studio. Enter the private HTTPS address your family uses to reach it,
+          or scan the QR code shown by the server administrator.
+        </p>
+        <form id="server-form" novalidate>
+          <label for="server-url">HomeOrbit server address</label>
+          <input
+            id="server-url"
+            name="server"
+            type="url"
+            inputmode="url"
+            autocapitalize="none"
+            autocomplete="url"
+            autocorrect="off"
+            spellcheck="false"
+            placeholder="https://homeorbit.example.ts.net"
+            required
+          />
+          <p id="current-server" class="hint hidden"></p>
+          <div class="actions">
+            <button id="connect-button" class="primary" type="submit">Connect</button>
+            <button id="scan-button" class="secondary" type="button">Scan QR</button>
+            <input id="qr-file" class="hidden" type="file" accept="image/*" />
+          </div>
+          <p id="status" class="status" role="status" aria-live="polite"></p>
+        </form>
+
+        <details>
+          <summary>Where do I find this address?</summary>
+          <p>
+            Use the address configured for your household, for example a Tailscale HTTPS name or a trusted
+            LAN address. The server must be reachable from this device and must run the HomeOrbit web app.
+            Model servers (Ollama/ComfyUI) are never connected to directly — all AI work stays on the server.
+          </p>
+          <p>
+            For a trusted LAN test you may use <code>http://192.168.1.20:3000</code>. Outside the home,
+            always use HTTPS through a VPN or authenticated gateway.
+          </p>
+        </details>
+      </div>
+
+      <p class="footnote">
+        The app contains no AI model. Conversations, images, memories and family data stay on your server.
+      </p>
+    </main>
+    <script src="vendor/jsQR.js"></script>
+    <script src="shell.js"></script>
+  </body>
+</html>

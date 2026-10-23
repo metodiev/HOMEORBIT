@@ -388,6 +388,7 @@ service manager (production).
 | Variable | Purpose | Default |
 | --- | --- | --- |
 | `HOMEORBIT_DB_PATH` | SQLite database file | `data/homeorbit.db` |
+| `MOBILE_PUBLIC_URL` | Public HTTPS root URL shown as a pairing QR in Settings | unset |
 | `SESSION_COOKIE_SECURE` | Force/disable secure session cookie | `true` in production |
 | `OLLAMA_BASE_URL` | Local Ollama server | `http://127.0.0.1:11434` |
 | `OLLAMA_MODEL` | Default text model | unset (built-in assistant) |
@@ -414,6 +415,129 @@ service manager (production).
 | `PROACTIVE_SECRET` | Cron secret for proactive checks | unset |
 
 Never commit `.env`, `.env.local`, backups, the database or the media folder. They are gitignored.
+
+---
+
+## Android and iOS apps
+
+HomeOrbit ships a Capacitor 8 native shell for **private family distribution**. The shell contains no
+AI model and no family data; it loads the authenticated HomeOrbit web app from the Mac Studio. All
+Next.js pages, server actions, media routes, AI tools, memories, image jobs and movie data continue
+to run on the server exactly as in the browser.
+
+The native projects live in [`android/`](./android) and [`ios/`](./ios). The setup/offline pages and
+the native bridge live in [`mobile/www`](./mobile/www).
+
+### What the native shell adds
+
+- A first-launch setup screen with manual server URL entry and QR scanning from a photo.
+- A persisted server address (Android SharedPreferences / iOS UserDefaults). Change it later from
+  **Settings → Mobile app connection**, which restarts the native bridge with the new origin.
+- A self-contained offline/error page with retry and a change-server link that returns to setup even
+  when the saved server is unreachable.
+- Native back-button handling, external links opened in the system browser, network-offline banner.
+- Downloads from the private media library open the native share/save sheet instead of being trapped
+  in the WebView.
+- File/image inputs use the platform photo picker and camera, so uploads and mask selection work as
+  they do on the web.
+- Status-bar/splash-screen/keyboard integration and generated app icons.
+
+The server URL must be the **root** address (for example `https://homeorbit.example.ts.net`). A
+custom path, query, fragment or embedded credentials are rejected. `http://` is accepted only for
+trusted LAN testing; use HTTPS through Tailscale/Caddy for remote use.
+
+### Pairing a phone
+
+1. Set `MOBILE_PUBLIC_URL` on the server to the HTTPS root address phones use.
+2. Sign in on a computer and open **Settings → Pair a phone or tablet**. The pairing card shows a QR
+   code and the address.
+3. On the phone, open the HomeOrbit app and tap **Scan QR**. Choose a photo of the QR code (the photo
+   picker works without a special camera permission), or type the address manually.
+4. Sign in normally. The session cookie stays in the platform WebView; API keys and AI credentials
+   never reach the app.
+
+If the server is unreachable at launch, the native error page offers **Retry** and **Change server**.
+The change-server link uses the app-local `homeorbit://setup` scheme, clears only the saved server
+address and reopens setup, so the app can always recover without reinstalling. The server session
+cookie remains in the platform WebView until it is signed out or the app's site data is cleared.
+
+### Build prerequisites
+
+| Platform | Required tooling |
+| --- | --- |
+| Android | Android Studio with Android SDK 36, JDK 21, an emulator or USB-debugging phone |
+| iOS | macOS with Xcode 16+, an Apple ID/team for signing, a connected iPhone (or Simulator for UI testing) |
+
+The native projects are generated and committed. After changing the setup pages, plugins or
+`capacitor.config.ts`, run:
+
+```bash
+npm run mobile:sync
+```
+
+`mobile:sync` copies the setup shell and plugin manifests into both native projects. The remote
+HomeOrbit app itself does **not** need to be copied into the native bundle on every web deploy; the
+phone continues to load the server.
+
+### Android
+
+Open the project in Android Studio:
+
+```bash
+npm run mobile:android
+```
+
+Or build a debug APK from the command line (with the Android SDK and JDK configured):
+
+```bash
+cd android
+./gradlew assembleDebug
+adb install -r app/build/outputs/apk/debug/app-debug.apk
+```
+
+For a release APK/AAB, create a keystore in Android Studio (Build → Generate Signed Bundle/APK),
+keep the keystore and passwords out of git, and distribute the signed artifact privately to family
+devices. `applicationId` is `com.homeorbit.family`. The native configuration allows cleartext HTTP
+for trusted LAN testing; disable/remove that allowance before any broader distribution.
+
+### iOS
+
+Open the Xcode project:
+
+```bash
+npm run mobile:ios
+```
+
+In Xcode select the `App` target and configure your signing team. Run on a connected device for a
+private install. A command-line archive can be produced with:
+
+```bash
+xcodebuild -project ios/App/App.xcodeproj -scheme App -configuration Release \
+  -destination 'generic/platform=iOS' -archivePath build/HomeOrbit.xcarchive archive
+```
+
+Then distribute through TestFlight (paid Apple Developer account) or a private/enterprise channel.
+A free personal team provisioning profile normally expires after seven days. The app uses
+`NSAllowsArbitraryLoads` only to support a trusted HTTP LAN trial; use HTTPS for remote access and
+review this setting before any public distribution.
+
+### Store distribution note
+
+This is a private web-application shell, not a public consumer app. Apple App Store guideline 4.2
+and Google Play policy can reject apps that are merely a website wrapper. The intended deployment is
+sideloading, TestFlight, an internal Android track, or a private MDM/enterprise channel. If public
+store distribution is required, add native-only features and complete a store review plan first.
+
+### Mobile security checklist
+
+- Serve the app over HTTPS for any device outside the trusted home LAN.
+- Keep `SESSION_COOKIE_SECURE=true` for HTTPS; set it to `false` only for an HTTP LAN trial.
+- Never put Ollama (11434), ComfyUI (8188), SQLite or SearXNG admin interfaces on a public port.
+- The app stores only the server URL in platform preferences. Passwords, session cookies and API
+  keys are not copied into the native bundle. The WebView cookie jar is protected by the OS app
+  sandbox; use device passcode/biometrics and remote wipe for lost phones.
+- Sign out on shared phones; server sessions can be revoked from account settings.
+- Rebuild/reinstall after changing the setup shell, native plugin code or app icons.
 
 ---
 
@@ -492,7 +616,7 @@ their metadata. Backups are only as good as the last successful restore test.
 ## Tests
 
 ```bash
-npm test          # 71 tests
+npm test          # 72 tests
 npm run typecheck
 npm run build
 ```
@@ -503,7 +627,8 @@ access, family albums, path traversal and magic-byte validation, image queue ser
 per-member isolation, a complete ComfyUI job through a stub HTTP server, workflow validation,
 approved actions executing as the requester, focused tool-set selection for small local models,
 TMDB verification with mocked HTTP, malformed local model output falling back safely without
-repeating side effects, relative-date repair for weak local models, and SSRF blocking for web fetch.
+repeating side effects, relative-date repair for weak local models, SSRF blocking for web fetch, and
+native mobile server-address validation.
 
 Manual cross-user checks worth repeating after changes:
 
@@ -532,6 +657,9 @@ Manual cross-user checks worth repeating after changes:
 | `npm run proactive:run` | run proactive checks from cron |
 | `npm run media:purge` | permanently purge soft-deleted media after retention |
 | `npm run backup` | checkpoint and copy database + media |
+| `npm run mobile:sync` | copy setup shell and plugins into Android/iOS |
+| `npm run mobile:android` / `mobile:ios` | open the native project |
+| `npm run mobile:assets` | regenerate native icons/splash from `assets/icon.svg` |
 
 ---
 

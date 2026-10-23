@@ -1,0 +1,7 @@
+<?xml version='1.0' encoding='utf-8'?>
+<resources>
+    <string name="app_name">HomeOrbit</string>
+    <string name="title_activity_main">HomeOrbit</string>
+    <string name="package_name">com.homeorbit.family</string>
+    <string name="custom_url_scheme">com.homeorbit.family</string>
+</resources>

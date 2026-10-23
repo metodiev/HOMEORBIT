@@ -7,6 +7,7 @@ import { unreadNotificationCount } from "@/lib/domain/notifications";
 import { listPendingApprovals } from "@/lib/domain/approvals";
 import { SidebarNav, MobileNav } from "@/components/Nav";
 import { MemberAvatar } from "@/components/ui";
+import { NativeMobileBridge } from "@/components/NativeMobileBridge";
 
 const ROLE_LABELS: Record<string, { en: string; bg: string }> = {
   parent: { en: "Parent · guardian", bg: "Родител · настойник" },
@@ -45,6 +46,7 @@ export default async function AppLayout({ children }: { children: React.ReactNod
 
   return (
     <div className="lg:flex">
+      <NativeMobileBridge />
       <SidebarNav primary={primary} secondary={secondary} actor={navActor} labels={navLabels} />
       <div className="min-w-0 flex-1">
         <header className="sticky top-0 z-20 border-b border-black/5 bg-cream/85 backdrop-blur">
