@@ -1,0 +1,21 @@
+{
+  "name": "HomeOrbit — Family AI Assistant",
+  "short_name": "HomeOrbit",
+  "description": "Shared calendars, school runs, deliveries, shopping and an AI assistant that works with real family data.",
+  "start_url": "/dashboard",
+  "scope": "/",
+  "display": "standalone",
+  "background_color": "#f6f2ea",
+  "theme_color": "#0f766e",
+  "orientation": "portrait-primary",
+  "lang": "en",
+  "categories": ["productivity", "lifestyle"],
+  "icons": [
+    {
+      "src": "/icon.svg",
+      "sizes": "any",
+      "type": "image/svg+xml",
+      "purpose": "any maskable"
+    }
+  ]
+}
